@@ -1,0 +1,12 @@
+torch
+torchvision
+open-clip-torch
+chromadb
+pillow
+tqdm
+numpy
+pillow-heif
+fastapi
+uvicorn
+jinja2
+python-multipart

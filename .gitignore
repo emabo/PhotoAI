@@ -1,0 +1,27 @@
+# PhotoAI local config
+.env
+.envrc
+.env.*
+!.env.example
+
+# Python local runtime
+venv/
+.venv/
+__pycache__/
+
+# PhotoAI generated/local data
+db/
+cache/
+photos/
+thumbs/
+
+# Local DB files
+*.sqlite
+*.sqlite3
+*.db
+
+# GeoNames local data
+data/geonames/
+
+# Local personal notes
+MYTODO
