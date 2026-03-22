@@ -237,6 +237,21 @@ python photoai.py --from /path/to/new_images --recursive --prefer-metadata
 - `--sync-missing`: rescan `PHOTOAI_PHOTOS_DIR` and complete missing DB/Chroma/thumb/caption/tag data
 - `--quiet`: reduce output in `--sync-missing`
 - `--limit N`: limit visited files in `--sync-missing`
+- `--sync-subdir RELPATH`: with `--sync-missing`, scan only one subfolder under `PHOTOAI_PHOTOS_DIR`
+- `--sync-mime MIME`: with `--sync-missing`, scan only one MIME type (for example `image/jpeg`)
+
+### Sync-missing filtered examples
+
+```bash
+# scan only one subfolder
+python photoai.py --sync-missing --sync-subdir 2024/08
+
+# scan only JPEG files
+python photoai.py --sync-missing --sync-mime image/jpeg
+
+# combine both filters
+python photoai.py --sync-missing --sync-subdir 2024/08 --sync-mime image/jpeg --quiet
+```
 
 ### Important notes
 

@@ -353,11 +353,25 @@ def run_sync_missing_photos_dir(
     dry_run: bool,
     summary_only: bool,
     limit: int,
+    subdir: str,
+    only_mime: str,
 ) -> None:
     mode_label = " (dry-run)" if dry_run else ""
     step_header(f"Sync missing photos dir -> SQLite + Chroma{mode_label}")
 
     photos_dir_resolved = photos_dir.resolve()
+    scan_root = photos_dir_resolved
+    subdir_clean = subdir.strip().replace("\\", "/").strip("/")
+    if subdir_clean:
+        scan_root = (photos_dir_resolved / subdir_clean).resolve()
+        try:
+            scan_root.relative_to(photos_dir_resolved)
+        except ValueError as exc:
+            raise RuntimeError("--sync-subdir must stay within PHOTOAI_PHOTOS_DIR") from exc
+        if not scan_root.exists() or not scan_root.is_dir():
+            raise RuntimeError(f"--sync-subdir does not exist or is not a directory: {scan_root}")
+
+    only_mime_clean = only_mime.strip().lower()
 
     if dry_run:
         thumb_dir = Path(os.environ.get("PHOTOAI_THUMB_DIR", "cache/thumbs")).expanduser().resolve()
@@ -413,12 +427,18 @@ def run_sync_missing_photos_dir(
     }
 
     try:
-        all_files = [p for p in photos_dir_resolved.rglob("*") if p.is_file()]
+        all_files = [p for p in scan_root.rglob("*") if p.is_file()]
+        if only_mime_clean:
+            all_files = [p for p in all_files if (detect_mime(p) or "").strip().lower() == only_mime_clean]
         if limit > 0:
             all_files = all_files[:limit]
         total_files = len(all_files)
         if not summary_only:
             print(f"[INFO] Files found in PHOTOAI_PHOTOS_DIR: {total_files}")
+            if subdir_clean:
+                print(f"[INFO] Subdir filter: {subdir_clean}")
+            if only_mime_clean:
+                print(f"[INFO] MIME filter  : {only_mime_clean}")
         else:
             print(f"[INFO] Quiet mode: scanning {total_files} files")
 
@@ -1286,6 +1306,16 @@ def main() -> None:
         default=0,
         help="With --sync-missing, visit only the first N files (0 = no limit).",
     )
+    parser.add_argument(
+        "--sync-subdir",
+        default="",
+        help="With --sync-missing, scan only this subfolder under PHOTOAI_PHOTOS_DIR.",
+    )
+    parser.add_argument(
+        "--sync-mime",
+        default="",
+        help="With --sync-missing, scan only files with this MIME (e.g. image/jpeg).",
+    )
     args = parser.parse_args()
 
     device = os.environ.get("PHOTOAI_DEVICE", "cuda").strip().lower()
@@ -1340,6 +1370,9 @@ def main() -> None:
     if args.sync_missing:
         if args.limit < 0:
             raise RuntimeError("--limit must be >= 0")
+        sync_mime_clean = args.sync_mime.strip().lower()
+        if sync_mime_clean and sync_mime_clean not in SUPPORTED_MIME_TYPES:
+            raise RuntimeError(f"--sync-mime must be one of: {', '.join(sorted(SUPPORTED_MIME_TYPES))}")
         if args.skip_captions or args.skip_thumbs:
             print("[WARN] --skip-captions/--skip-thumbs are ignored in --sync-missing mode.")
         run_sync_missing_photos_dir(
@@ -1355,8 +1388,13 @@ def main() -> None:
             dry_run=args.dry_run,
             summary_only=args.quiet,
             limit=args.limit,
+            subdir=args.sync_subdir,
+            only_mime=sync_mime_clean,
         )
         return
+
+    if args.sync_subdir.strip() or args.sync_mime.strip():
+        raise RuntimeError("--sync-subdir and --sync-mime require --sync-missing")
 
     if not args.src_dir:
         raise RuntimeError("--from is required unless --sync-missing is used")
