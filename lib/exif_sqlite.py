@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 import os
-import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Dict, Optional, Tuple
+
+from lib.filename_date_parser import (
+    FILENAME_DATE_PATTERNS,
+    parse_date_from_stem,
+)
 
 
 EXIF_DATE_KEYS = (
@@ -13,53 +17,6 @@ EXIF_DATE_KEYS = (
     "EXIF DateTimeDigitized",
     "Image DateTime",
 )
-
-FILENAME_DATE_PATTERNS = [
-    "%Y:%m:%d %H:%M:%S",
-    "IMG-%Y%m%d-WA%f",
-    "IMG-%Y%m%d-WA%f_01",
-    "IMG-%Y%m%d-WA%f_1",
-    "IMG-%Y%m%d-WA%f_01_01",
-    "PANO_%Y%m%d_%H%M%S",
-    "IMG_%Y%m%d_%H%M%S",
-    "IMG_%Y-%m-%d-%f",
-    "%Y%m%d_%H%M%S",
-    "VID-%Y%m%d-WA%f",
-    "VID_%Y%m%d_%H%M%S",
-    "%Y%m%d_%H%M%S_%f",
-    "%Y%m%d-WA%f",
-    "%Y-%m-%d %H.%M.%S",
-]
-
-
-_TOKEN_REGEX = {
-    "%Y": r"(?P<Y>\d{4})",
-    "%m": r"(?P<m>\d{2})",
-    "%d": r"(?P<d>\d{2})",
-    "%H": r"(?P<H>\d{2})",
-    "%M": r"(?P<M>\d{2})",
-    "%S": r"(?P<S>\d{2})",
-    "%f": r"(?P<f>\d{1,9})",
-}
-
-
-def _compile_parser(pattern: str) -> re.Pattern:
-    parts = []
-    i = 0
-    while i < len(pattern):
-        if pattern[i] == "%" and i + 1 < len(pattern):
-            token = pattern[i : i + 2]
-            if token in _TOKEN_REGEX:
-                parts.append(_TOKEN_REGEX[token])
-                i += 2
-                continue
-        parts.append(re.escape(pattern[i]))
-        i += 1
-    return re.compile("^" + "".join(parts) + "$")
-
-
-_PARSER_REGEX = tuple((pattern, _compile_parser(pattern)) for pattern in FILENAME_DATE_PATTERNS)
-
 
 def must_env(name: str) -> str:
     value = os.environ.get(name)
@@ -122,18 +79,11 @@ def parse_exif_datetime(tags: Dict[str, object]) -> Optional[int]:
 
 def parse_datetime_from_filename(path: Path) -> Optional[int]:
     stem = path.stem
-    for _, regex in _PARSER_REGEX:
-        match = regex.match(stem)
-        if not match:
-            continue
-        try:
-            year = int(match.group("Y"))
-            month = int(match.group("m"))
-            day = int(match.group("d"))
-            dt = datetime(year, month, day, 0, 0, 0, tzinfo=timezone.utc)
-            return int(dt.timestamp())
-        except ValueError:
-            continue
+    parsed_date, _pattern = parse_date_from_stem(stem)
+    if parsed_date is not None:
+        dt = datetime(parsed_date.year, parsed_date.month, parsed_date.day, 0, 0, 0, tzinfo=timezone.utc)
+        return int(dt.timestamp())
+
     return None
 
 

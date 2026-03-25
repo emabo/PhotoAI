@@ -1,41 +1,15 @@
 #!/usr/bin/env python3
 import hashlib
 import os
-import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, date
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 
-
-PARSERS = [
-    "%Y:%m:%d %H:%M:%S",
-    "IMG-%Y%m%d-WA%f",
-    "IMG-%Y%m%d-WA%f_01",
-    "IMG-%Y%m%d-WA%f_1",
-    "IMG-%Y%m%d-WA%f_01_01",
-    "PANO_%Y%m%d_%H%M%S",
-    "IMG_%Y%m%d_%H%M%S",
-    "IMG_%Y-%m-%d-%f",
-    "%Y%m%d_%H%M%S",
-    "VID-%Y%m%d-WA%f",
-    "VID_%Y%m%d_%H%M%S",
-    "%Y%m%d_%H%M%S_%f",
-    "%Y%m%d-WA%f",
-    "%Y-%m-%d %H.%M.%S",
-]
-
-
-_TOKEN_REGEX = {
-    "%Y": r"(?P<Y>\d{4})",
-    "%m": r"(?P<m>\d{2})",
-    "%d": r"(?P<d>\d{2})",
-    "%H": r"(?P<H>\d{2})",
-    "%M": r"(?P<M>\d{2})",
-    "%S": r"(?P<S>\d{2})",
-    "%f": r"(?P<f>\d{1,9})",
-}
+from lib.filename_date_parser import (
+    parse_date_from_stem,
+)
 
 
 @dataclass
@@ -107,26 +81,9 @@ class Options:
     prefer_metadata_on_conflict: bool
     count_extensions: bool
     on_saved: Optional[Callable[[Path], None]] = None
-
-
-def _compile_parser(pattern: str) -> re.Pattern:
-    parts = []
-    i = 0
-    while i < len(pattern):
-        if pattern[i] == "%" and i + 1 < len(pattern):
-            token = pattern[i : i + 2]
-            if token in _TOKEN_REGEX:
-                parts.append(_TOKEN_REGEX[token])
-                i += 2
-                continue
-        parts.append(re.escape(pattern[i]))
-        i += 1
-    return re.compile("^" + "".join(parts) + "$")
-
-
-_PARSER_REGEX: Tuple[Tuple[str, re.Pattern], ...] = tuple(
-    (pattern, _compile_parser(pattern)) for pattern in PARSERS
-)
+    sha1_index: Optional[Dict[str, Path]] = None
+    dest_files_by_size: Optional[Dict[int, List[Path]]] = None
+    dest_sha1_cache: Optional[Dict[Path, str]] = None
 
 
 def find_existing_date_dir(base_path: Path, year_path: str, date_prefix: str) -> Optional[str]:
@@ -152,6 +109,70 @@ def compute_hash(filename: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+
+def _build_size_index(destination_root: Path, verbose: bool) -> Dict[int, List[Path]]:
+    index: Dict[int, List[Path]] = {}
+    if not destination_root.exists() or not destination_root.is_dir():
+        return index
+
+    for p in destination_root.rglob("*"):
+        if not p.is_file():
+            continue
+        try:
+            size = int(p.stat().st_size)
+        except OSError:
+            continue
+        if size < 0:
+            continue
+        index.setdefault(size, []).append(p)
+
+    if verbose:
+        total_files = sum(len(v) for v in index.values())
+        print(f"Destination size index loaded: {total_files} files")
+    return index
+
+
+def _find_existing_sha1_in_destination(opts: Options, destination_root: Path, src_sha1: str, src_size: int) -> Optional[Path]:
+    if opts.sha1_index is None:
+        opts.sha1_index = {}
+    if opts.dest_sha1_cache is None:
+        opts.dest_sha1_cache = {}
+    if opts.dest_files_by_size is None:
+        opts.dest_files_by_size = _build_size_index(destination_root, opts.verbose)
+
+    cached = opts.sha1_index.get(src_sha1)
+    if cached is not None:
+        if cached.exists() and cached.is_file():
+            return cached
+        opts.sha1_index.pop(src_sha1, None)
+
+    candidates = opts.dest_files_by_size.get(src_size, [])
+    if not candidates:
+        return None
+
+    alive_candidates: List[Path] = []
+    for p in candidates:
+        if not p.exists() or not p.is_file():
+            opts.dest_sha1_cache.pop(p, None)
+            continue
+
+        alive_candidates.append(p)
+
+        dst_sha1 = opts.dest_sha1_cache.get(p)
+        if not dst_sha1:
+            try:
+                dst_sha1 = compute_hash(str(p))
+            except OSError:
+                continue
+            opts.dest_sha1_cache[p] = dst_sha1
+
+        if dst_sha1 == src_sha1:
+            opts.sha1_index[src_sha1] = p
+            return p
+
+    opts.dest_files_by_size[src_size] = alive_candidates
+    return None
 
 
 def _exif_tag_value(tags: Dict[str, object], key: str) -> Optional[str]:
@@ -193,18 +214,11 @@ def extract_date(filename: str, verbose: bool) -> datetime:
 
 
 def extract_date_from_filename(filename: str, verbose: bool) -> date:
-    for pattern, regex in _PARSER_REGEX:
-        match = regex.match(filename)
-        if match:
-            if verbose:
-                print(f"Format found: {pattern}")
-            try:
-                year = int(match.group("Y"))
-                month = int(match.group("m"))
-                day = int(match.group("d"))
-                return date(year, month, day)
-            except ValueError:
-                break
+    parsed_date, pattern = parse_date_from_stem(filename)
+    if parsed_date is not None:
+        if verbose and pattern:
+            print(f"Format found: {pattern}")
+        return parsed_date
     raise RuntimeError("Date from filename not found")
 
 
@@ -298,9 +312,35 @@ def compute_file(entry: os.DirEntry, opts: Options, stats: Stats, ext_count: Ext
     if chosen_date is None:
         return
 
+    src_sha1 = compute_hash(full_filename_from)
+    try:
+        src_size = int(path_from.stat().st_size)
+    except OSError:
+        src_size = -1
+
     date_only = chosen_date.date()
 
     orig_path = Path(opts.dir_to)
+
+    existing_same_sha1 = _find_existing_sha1_in_destination(opts, orig_path, src_sha1, src_size)
+    if existing_same_sha1 is not None:
+        try:
+            same_file = existing_same_sha1.resolve() == path_from.resolve()
+        except Exception:
+            same_file = False
+
+        if not same_file:
+            print(f"SKIP duplicate SHA1: {full_filename_from} (already in destination as {existing_same_sha1})")
+            if opts.verbose:
+                print(f"Duplicate by SHA1 found in destination: {existing_same_sha1}")
+            if not opts.copy:
+                if opts.verbose:
+                    print(f"Deleting {full_filename_from}")
+                if not opts.dry_run:
+                    os.remove(full_filename_from)
+            stats.inc_already_present()
+            return
+
     year_dir = f"{date_only.year:04}"
     date_prefix = f"{date_only.year:04}_{date_only.month:02}_{date_only.day:02}"
 
@@ -342,9 +382,8 @@ def compute_file(entry: os.DirEntry, opts: Options, stats: Stats, ext_count: Ext
             if opts.verbose:
                 print(f"File {full_filename_to} already exists")
 
-            hash_src = compute_hash(full_filename_from)
             hash_dst = compute_hash(str(full_filename_to))
-            if hash_src == hash_dst:
+            if src_sha1 == hash_dst:
                 if opts.verbose:
                     print("The two files are equal")
                 if not opts.copy:
@@ -377,6 +416,12 @@ def compute_file(entry: os.DirEntry, opts: Options, stats: Stats, ext_count: Ext
                     stats.inc_copied()
                     if opts.on_saved is not None:
                         opts.on_saved(full_filename_to)
+                    if opts.sha1_index is not None and src_sha1 not in opts.sha1_index:
+                        opts.sha1_index[src_sha1] = full_filename_to
+                    if opts.dest_sha1_cache is not None:
+                        opts.dest_sha1_cache[full_filename_to] = src_sha1
+                    if opts.dest_files_by_size is not None and src_size >= 0:
+                        opts.dest_files_by_size.setdefault(src_size, []).append(full_filename_to)
             else:
                 if opts.verbose:
                     print(f"Move {full_filename_from} to {full_filename_to}")
@@ -391,6 +436,12 @@ def compute_file(entry: os.DirEntry, opts: Options, stats: Stats, ext_count: Ext
                     stats.inc_moved()
                     if opts.on_saved is not None:
                         opts.on_saved(full_filename_to)
+                    if opts.sha1_index is not None and src_sha1 not in opts.sha1_index:
+                        opts.sha1_index[src_sha1] = full_filename_to
+                    if opts.dest_sha1_cache is not None:
+                        opts.dest_sha1_cache[full_filename_to] = src_sha1
+                    if opts.dest_files_by_size is not None and src_size >= 0:
+                        opts.dest_files_by_size.setdefault(src_size, []).append(full_filename_to)
             done = True
 
 
