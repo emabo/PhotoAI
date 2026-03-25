@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 FILENAME_DATE_PATTERNS = [
     "%Y:%m:%d %H:%M:%S",
     "%Y.%m.%d%*",
+    "%Y%m%d%H%M%S",
     "IMG-%Y%m%d-WA%f",
     "IMG-%Y%m%d-WA%f_01",
     "IMG-%Y%m%d-WA%f_1",
@@ -90,3 +91,32 @@ def parse_date_from_stem(stem: str) -> Tuple[Optional[date], Optional[str]]:
             continue
     # Fallback: embedded Unix timestamp (GoPro, etc.)
     return _parse_unix_ts_from_stem(stem)
+
+
+def parse_datetime_from_stem(stem: str) -> Tuple[Optional[datetime], Optional[str]]:
+    for pattern, regex in _PARSER_REGEX:
+        match = regex.match(stem)
+        if not match:
+            continue
+        try:
+            year = int(match.group("Y"))
+            month = int(match.group("m"))
+            day = int(match.group("d"))
+
+            h_raw = match.groupdict().get("H")
+            m_raw = match.groupdict().get("M")
+            s_raw = match.groupdict().get("S")
+
+            hour = int(h_raw) if h_raw is not None else 0
+            minute = int(m_raw) if m_raw is not None else 0
+            second = int(s_raw) if s_raw is not None else 0
+
+            return datetime(year, month, day, hour, minute, second), pattern
+        except ValueError:
+            continue
+
+    parsed_date, pattern = _parse_unix_ts_from_stem(stem)
+    if parsed_date is not None:
+        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 0, 0, 0), pattern
+
+    return None, None

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from lib.filename_date_parser import (
+    parse_datetime_from_stem,
     parse_date_from_stem,
 )
 
@@ -347,11 +348,11 @@ def extract_date(filename: str, verbose: bool, filename_for_fallback: Optional[s
     
     # Fallback: try filename
     if filename_for_fallback:
-        parsed_date, pattern = parse_date_from_stem(filename_for_fallback)
-        if parsed_date is not None:
+        parsed_dt, pattern = parse_datetime_from_stem(filename_for_fallback)
+        if parsed_dt is not None:
             if verbose:
                 print(f"Date extracted from filename using pattern: {pattern}")
-            return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 0, 0, 0)
+            return parsed_dt
     
     raise RuntimeError("Date from file not found")
 

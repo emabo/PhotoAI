@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, Optional, Tuple
 
 from lib.filename_date_parser import (
-    FILENAME_DATE_PATTERNS,
+    parse_datetime_from_stem,
     parse_date_from_stem,
 )
 
@@ -79,9 +79,9 @@ def parse_exif_datetime(tags: Dict[str, object]) -> Optional[int]:
 
 def parse_datetime_from_filename(path: Path) -> Optional[int]:
     stem = path.stem
-    parsed_date, _pattern = parse_date_from_stem(stem)
-    if parsed_date is not None:
-        dt = datetime(parsed_date.year, parsed_date.month, parsed_date.day, 0, 0, 0, tzinfo=timezone.utc)
+    parsed_dt, _pattern = parse_datetime_from_stem(stem)
+    if parsed_dt is not None:
+        dt = parsed_dt.replace(tzinfo=timezone.utc)
         return int(dt.timestamp())
 
     return None
