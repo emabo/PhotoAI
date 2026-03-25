@@ -21,6 +21,9 @@ SUPPORTED_MIME_TYPES = {
     "image/heic",
     "image/heif",
     "video/mp4",
+    "video/x-msvideo",
+    "video/avi",
+    "video/mpeg",
 }
 
 

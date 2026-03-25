@@ -57,10 +57,16 @@ SUPPORTED_MIME_TYPES = {
     "image/heic",
     "image/heif",
     "video/mp4",
+    "video/x-msvideo",
+    "video/avi",
+    "video/mpeg",
 }
 
 BASE_ONLY_MIME_TYPES = {
     "video/mp4",
+    "video/x-msvideo",
+    "video/avi",
+    "video/mpeg",
 }
 
 
@@ -84,6 +90,178 @@ def probe_video_metadata(abs_path: Path) -> Dict[str, Any]:
     import json
     import re
     import subprocess
+
+    def _to_int(value: Any) -> int:
+        try:
+            return int(float(value))
+        except Exception:
+            return 0
+
+    def _to_duration(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            d = float(value)
+            return d if d > 0 else None
+        except Exception:
+            pass
+
+        text = str(value).strip().lower()
+        if not text:
+            return None
+
+        text = text.replace("sec", "s").replace("secs", "s").replace("seconds", "s")
+
+        m = re.match(r"^(\d+(?:\.\d+)?)\s*s$", text)
+        if m:
+            try:
+                d = float(m.group(1))
+                return d if d > 0 else None
+            except Exception:
+                return None
+
+        m = re.match(r"^(\d+):(\d+):(\d+(?:\.\d+)?)$", text)
+        if m:
+            try:
+                hh = int(m.group(1))
+                mm = int(m.group(2))
+                ss = float(m.group(3))
+                d = hh * 3600 + mm * 60 + ss
+                return d if d > 0 else None
+            except Exception:
+                return None
+
+        return None
+
+    def _build_iso6709(lat: float, lon: float, alt: Optional[float]) -> str:
+        lat_str = f"{lat:+.8f}".rstrip("0").rstrip(".")
+        lon_str = f"{lon:+.8f}".rstrip("0").rstrip(".")
+        if alt is None:
+            return f"{lat_str}{lon_str}/"
+        alt_str = f"{alt:+.2f}".rstrip("0").rstrip(".")
+        return f"{lat_str}{lon_str}{alt_str}/"
+
+    def _parse_datetime_like(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        raw = str(value).strip()
+        if not raw:
+            return None
+
+        # ExifTool often uses "YYYY:MM:DD HH:MM:SS[.sss][Z|+HH:MM]"
+        if re.match(r"^\d{4}:\d{2}:\d{2}\s+\d{2}:\d{2}:\d{2}", raw):
+            normalized = raw.replace(" ", "T", 1)
+            normalized = re.sub(r"^(\d{4}):(\d{2}):(\d{2})T", r"\1-\2-\3T", normalized)
+            return normalized
+
+        # Already close to ISO
+        return raw
+
+    def _probe_with_exiftool(path: Path) -> Optional[Dict[str, Any]]:
+        try:
+            result = subprocess.run(
+                ["exiftool", "-j", "-n", "-api", "largefilesupport=1", str(path)],
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode != 0 or not result.stdout:
+                return None
+
+            payload = json.loads(result.stdout)
+            if not isinstance(payload, list) or not payload:
+                return None
+            tags = payload[0] if isinstance(payload[0], dict) else {}
+            if not isinstance(tags, dict):
+                return None
+
+            w = 0
+            h = 0
+            duration: Optional[float] = None
+
+            for key in ("ImageWidth", "SourceImageWidth", "ExifImageWidth", "Width"):
+                w = _to_int(tags.get(key))
+                if w > 0:
+                    break
+            for key in ("ImageHeight", "SourceImageHeight", "ExifImageHeight", "Height"):
+                h = _to_int(tags.get(key))
+                if h > 0:
+                    break
+
+            for key in ("Duration", "MediaDuration", "TrackDuration"):
+                duration = _to_duration(tags.get(key))
+                if duration is not None:
+                    break
+
+            format_tags: Dict[str, Any] = {}
+            for key in (
+                "CreationTime",
+                "MediaCreateDate",
+                "TrackCreateDate",
+                "CreateDate",
+                "DateTimeOriginal",
+            ):
+                creation_like = _parse_datetime_like(tags.get(key))
+                if creation_like:
+                    format_tags["creation_time"] = creation_like
+                    break
+
+            lat = tags.get("GPSLatitude")
+            lon = tags.get("GPSLongitude")
+            alt_raw = tags.get("GPSAltitude")
+            try:
+                gps_lat = float(lat) if lat is not None else None
+                gps_lon = float(lon) if lon is not None else None
+            except Exception:
+                gps_lat, gps_lon = None, None
+
+            gps_alt: Optional[float] = None
+            if alt_raw is not None:
+                try:
+                    gps_alt = float(alt_raw)
+                except Exception:
+                    gps_alt = None
+
+            if gps_lat is not None and gps_lon is not None:
+                format_tags["location"] = _build_iso6709(gps_lat, gps_lon, gps_alt)
+
+            return {
+                "w": w,
+                "h": h,
+                "duration": duration,
+                "format_tags": format_tags,
+                "stream_tags": [],
+            }
+        except Exception:
+            return None
+
+    def _merge_meta(base: Dict[str, Any], extra: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not extra:
+            return base
+
+        merged: Dict[str, Any] = {
+            "w": int(base.get("w") or 0),
+            "h": int(base.get("h") or 0),
+            "duration": base.get("duration"),
+            "format_tags": dict(base.get("format_tags") or {}),
+            "stream_tags": list(base.get("stream_tags") or []),
+        }
+
+        if merged["w"] <= 0:
+            merged["w"] = int(extra.get("w") or 0)
+        if merged["h"] <= 0:
+            merged["h"] = int(extra.get("h") or 0)
+        if merged["duration"] is None:
+            merged["duration"] = extra.get("duration")
+
+        for key, value in (extra.get("format_tags") or {}).items():
+            if key not in merged["format_tags"] or not merged["format_tags"][key]:
+                merged["format_tags"][key] = value
+
+        extra_stream_tags = extra.get("stream_tags") or []
+        if extra_stream_tags:
+            merged["stream_tags"].extend(extra_stream_tags)
+
+        return merged
 
     def _parse_ffprobe(data: Dict[str, Any]) -> Dict[str, Any]:
         stream_tags: List[Dict[str, Any]] = []
@@ -143,6 +321,7 @@ def probe_video_metadata(abs_path: Path) -> Dict[str, Any]:
 
         return out
 
+    ffprobe_meta: Optional[Dict[str, Any]] = None
     try:
         result = subprocess.run(
             [
@@ -156,9 +335,19 @@ def probe_video_metadata(abs_path: Path) -> Dict[str, Any]:
             timeout=30,
         )
         if result.returncode == 0 and result.stdout:
-            return _parse_ffprobe(json.loads(result.stdout))
+            ffprobe_meta = _parse_ffprobe(json.loads(result.stdout))
     except Exception:
         pass
+
+    if ffprobe_meta is not None:
+        needs_extra = (
+            ffprobe_meta.get("duration") is None
+            or not _extract_video_location_tag(ffprobe_meta)
+            or not (ffprobe_meta.get("format_tags") or {}).get("creation_time")
+        )
+        if needs_extra:
+            return _merge_meta(ffprobe_meta, _probe_with_exiftool(abs_path))
+        return ffprobe_meta
 
     try:
         result = subprocess.run(
@@ -183,21 +372,26 @@ def probe_video_metadata(abs_path: Path) -> Dict[str, Any]:
             ss = float(duration_match.group(3))
             duration = hh * 3600 + mm * 60 + ss
 
-        return {
+        ffmpeg_meta = {
             "w": w,
             "h": h,
             "duration": duration,
             "format_tags": {},
             "stream_tags": [],
         }
+        needs_extra = duration is None
+        if needs_extra:
+            return _merge_meta(ffmpeg_meta, _probe_with_exiftool(abs_path))
+        return ffmpeg_meta
     except Exception:
-        return {
+        empty_meta = {
             "w": 0,
             "h": 0,
             "duration": None,
             "format_tags": {},
             "stream_tags": [],
         }
+        return _merge_meta(empty_meta, _probe_with_exiftool(abs_path))
 
 
 def _extract_video_location_tag(meta: Dict[str, Any]) -> Optional[str]:
@@ -210,6 +404,36 @@ def _extract_video_location_tag(meta: Dict[str, Any]) -> Optional[str]:
         location = tags.get("location") or tags.get("com.apple.quicktime.location.ISO6709")
         if location:
             return str(location).strip()
+
+    return None
+
+
+def _extract_video_creation_time_tag(meta: Dict[str, Any]) -> Optional[str]:
+    format_tags = meta.get("format_tags") or {}
+    for key in (
+        "creation_time",
+        "com.apple.quicktime.creationdate",
+        "CreationTime",
+        "MediaCreateDate",
+        "TrackCreateDate",
+        "CreateDate",
+    ):
+        value = format_tags.get(key)
+        if value:
+            return str(value).strip()
+
+    for tags in meta.get("stream_tags") or []:
+        for key in (
+            "creation_time",
+            "com.apple.quicktime.creationdate",
+            "CreationTime",
+            "MediaCreateDate",
+            "TrackCreateDate",
+            "CreateDate",
+        ):
+            value = tags.get(key)
+            if value:
+                return str(value).strip()
 
     return None
 
@@ -785,11 +1009,7 @@ def enrich_video_metadata(con: sqlite3.Connection, sha1: str, abs_path: Path) ->
         pass
 
     # taken_at from creation_time tag
-    tags = meta.get("format_tags") or {}
-    creation_time_str = (
-        tags.get("creation_time")
-        or tags.get("com.apple.quicktime.creationdate")
-    )
+    creation_time_str = _extract_video_creation_time_tag(meta)
     taken_at: Optional[int] = None
     if creation_time_str:
         try:
@@ -923,6 +1143,85 @@ def load_location_context(db_path: Path) -> Optional[Dict[str, Any]]:
         "round_digits": 3,
         "max_km": 50.0,
     }
+
+
+def process_one_base_media(
+    con: sqlite3.Connection,
+    img_path: Path,
+    pipeline_ctx: Dict[str, Any],
+    location_ctx: Optional[Dict[str, Any]],
+    add_step: str,
+    skip_thumbs: bool,
+    sha1: Optional[str] = None,
+    mime: Optional[str] = None,
+) -> Tuple[str, str]:
+    photos_dir = pipeline_ctx["photos_dir"]
+    try:
+        relpath = str(img_path.resolve().relative_to(photos_dir)).replace("\\", "/")
+    except ValueError as exc:
+        raise RuntimeError(f"Media outside photos dir: {img_path}") from exc
+
+    if sha1 is None:
+        sha1 = sha1_file(img_path)
+
+    if mime is None:
+        mime = detect_mime(img_path)
+
+    if mime not in BASE_ONLY_MIME_TYPES:
+        raise RuntimeError(f"Unsupported base-only mime: {mime or 'unknown'}")
+
+    def safe_job_state(status: str, detail: str) -> None:
+        try:
+            ensure_job_state(con, sha1, add_step, status, detail)
+        except sqlite3.IntegrityError:
+            return
+
+    st = img_path.stat()
+
+    try:
+        video_meta = probe_video_metadata(img_path)
+        w = int(video_meta.get("w") or 0)
+        h = int(video_meta.get("h") or 0)
+        duration: Optional[float] = None
+        try:
+            d = float(video_meta.get("duration") or 0)
+            if d > 0:
+                duration = d
+        except Exception:
+            duration = None
+
+        upsert_image_row(
+            con=con,
+            sha1=sha1,
+            relpath=relpath,
+            mtime=float(st.st_mtime),
+            w=w,
+            h=h,
+            duration=duration,
+            file_size=int(st.st_size),
+            mime=mime,
+        )
+        safe_job_state("processing", "start_base_only")
+        con.commit()
+
+        enrich_video_metadata(con, sha1, img_path)
+        enrich_exif(con, sha1, img_path)
+
+        if location_ctx is not None:
+            enrich_location(con, sha1, location_ctx)
+
+        if not skip_thumbs:
+            thumb_path = pipeline_ctx["thumb_dir"] / f"{sha1}.jpg"
+            pipeline_ctx["thumbsmod"].make_video_thumb(img_path, thumb_path, size=pipeline_ctx["thumb_size"])
+
+        safe_job_state("done_base", f"base_only_mime:{mime}")
+        con.commit()
+        return sha1, "done_base"
+
+    except Exception as exc:
+        safe_job_state("error", str(exc))
+        con.commit()
+        return sha1, f"error: {exc}"
 
 
 def enrich_location(con: sqlite3.Connection, sha1: str, location_ctx: Dict[str, Any]) -> None:
@@ -1093,6 +1392,19 @@ def process_one_image(
     sha1: Optional[str] = None,
 ) -> Tuple[str, str]:
     from lib import chroma_image_index as idxmod
+
+    mime = detect_mime(img_path)
+    if mime in BASE_ONLY_MIME_TYPES:
+        return process_one_base_media(
+            con=con,
+            img_path=img_path,
+            pipeline_ctx=pipeline_ctx,
+            location_ctx=location_ctx,
+            add_step=add_step,
+            skip_thumbs=skip_thumbs,
+            sha1=sha1,
+            mime=mime,
+        )
 
     photos_dir = pipeline_ctx["photos_dir"]
     try:
@@ -1403,6 +1715,7 @@ def main() -> None:
 
     con: Optional[sqlite3.Connection] = None
     done = 0
+    done_base = 0
     failed = 0
     add_step = "add_all"
 
@@ -1433,7 +1746,7 @@ def main() -> None:
         con.execute("PRAGMA foreign_keys=ON;")
 
         def on_saved(dst_path: Path) -> None:
-            nonlocal done, failed
+            nonlocal done, done_base, failed
 
             if con is None:
                 return
@@ -1453,6 +1766,9 @@ def main() -> None:
             if status == "done":
                 done += 1
                 print(f"[OK] {sha1_out}")
+            elif status == "done_base":
+                done_base += 1
+                print(f"[OK-BASE] {sha1_out}")
             else:
                 failed += 1
                 print(f"[ERR] {sha1_out} -> {status}")
@@ -1479,6 +1795,7 @@ def main() -> None:
 
     print("\nPipeline completed.")
     print(f"  done  : {done}")
+    print(f"  done_base : {done_base}")
     print(f"  error : {failed}")
     print(f"  state : jobs.step='{add_step}'")
     print(f"  env   : PHOTOAI_CAPTION_STEP='{caption_step}' PHOTOAI_CAPTION_PASS_LIMIT={caption_pass_limit}")
