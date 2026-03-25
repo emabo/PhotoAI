@@ -224,13 +224,14 @@ def probe_video_metadata(abs_path: Path) -> Dict[str, Any]:
             if gps_lat is not None and gps_lon is not None:
                 format_tags["location"] = _build_iso6709(gps_lat, gps_lon, gps_alt)
 
-            return {
+            result = {
                 "w": w,
                 "h": h,
                 "duration": duration,
                 "format_tags": format_tags,
                 "stream_tags": [],
             }
+            return result
         except Exception:
             return None
 
@@ -1744,6 +1745,7 @@ def main() -> None:
         con.execute("PRAGMA journal_mode=WAL;")
         con.execute("PRAGMA synchronous=NORMAL;")
         con.execute("PRAGMA foreign_keys=ON;")
+        con.row_factory = sqlite3.Row
 
         def on_saved(dst_path: Path) -> None:
             nonlocal done, done_base, failed

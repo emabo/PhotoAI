@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 import hashlib
+import json
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, date
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from lib.filename_date_parser import (
     parse_date_from_stem,
 )
+
+# Video MIME types that should be handled as "base-only" with video metadata extraction
+BASE_ONLY_MIME_TYPES = {
+    "video/mp4",
+    "video/x-msvideo",
+    "video/avi",
+    "video/mpeg",
+}
 
 
 @dataclass
@@ -182,35 +192,168 @@ def _exif_tag_value(tags: Dict[str, object], key: str) -> Optional[str]:
     return str(value)
 
 
-def extract_date(filename: str, verbose: bool) -> datetime:
+def detect_mime(path: Path) -> Optional[str]:
+    """Detect MIME type of a file (simple heuristic)."""
+    try:
+        from lib import mime_sqlite as mimemod
+        return mimemod.detect_mime(path)
+    except Exception:
+        pass
+    
+    import mimetypes
+    mime, _ = mimetypes.guess_type(str(path), strict=False)
+    return mime
+
+
+def _parse_video_datetime(dt_str: Optional[str]) -> Optional[datetime]:
+    """Parse datetime strings from video metadata (ISO 8601 or EXIF-like formats)."""
+    if not dt_str:
+        return None
+    
+    dt_str = str(dt_str).strip()
+    if not dt_str:
+        return None
+    
+    # Try ISO 8601 format first
+    for fmt in [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S.%fZ",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y:%m:%d %H:%M:%S",
+    ]:
+        try:
+            return datetime.strptime(dt_str.replace("Z", "+0000"), fmt)
+        except ValueError:
+            continue
+    
+    return None
+
+
+def extract_date_from_video(filename: str, verbose: bool) -> Optional[datetime]:
+    """Extract creation date from video file using ffprobe and exiftool fallback."""
+    try:
+        # Try ffprobe first
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-print_format", "json",
+                "-show_format",
+                str(filename),
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+        
+        if result.returncode == 0 and result.stdout:
+            data = json.loads(result.stdout)
+            fmt = data.get("format", {})
+            tags = fmt.get("tags", {})
+            
+            # Try common keys
+            for key in ("creation_time", "com.apple.quicktime.creationdate", "CreationTime", 
+                       "MediaCreateDate", "TrackCreateDate", "CreateDate", "DATE"):
+                dt_str = tags.get(key)
+                if dt_str:
+                    dt = _parse_video_datetime(dt_str)
+                    if dt:
+                        if verbose:
+                            print(f"Video date from ffprobe [{key}]: {dt}")
+                        return dt
+    except Exception:
+        pass
+    
+    # Fallback: try exiftool
+    try:
+        result = subprocess.run(
+            ["exiftool", "-n", "-j", str(filename)],
+            capture_output=True,
+            timeout=10,
+        )
+        
+        if result.returncode == 0 and result.stdout:
+            data = json.loads(result.stdout)
+            if isinstance(data, list) and data:
+                tags = data[0]
+                
+                # Try common exiftool keys
+                for key in ("CreationTime", "MediaCreateDate", "TrackCreateDate", "CreateDate", 
+                           "DateTimeOriginal", "ModifyDate"):
+                    value = tags.get(key)
+                    if value:
+                        dt = _parse_video_datetime(str(value))
+                        if dt:
+                            if verbose:
+                                print(f"Video date from exiftool [{key}]: {dt}")
+                            return dt
+    except Exception:
+        pass
+    
+    return None
+
+
+def extract_date(filename: str, verbose: bool, filename_for_fallback: Optional[str] = None) -> datetime:
+    """Extract date from file metadata (video or photo), with filename fallback.
+    
+    Args:
+        filename: Full path to the file
+        verbose: Print debug info
+        filename_for_fallback: Filename stem to use as fallback (e.g., 20240315_143045)
+    
+    Returns:
+        datetime object extracted from metadata or filename
+    
+    Raises:
+        RuntimeError if no date can be extracted
+    """
+    path = Path(filename)
+    mime = detect_mime(path)
+    
+    # Try video extraction if it looks like a video
+    if mime and mime in BASE_ONLY_MIME_TYPES:
+        video_date = extract_date_from_video(filename, verbose)
+        if video_date:
+            return video_date
+        if verbose:
+            print(f"Could not extract date from video metadata, trying filename")
+    
+    # Try EXIF extraction for photos (or as fallback)
     try:
         import exifread  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError("Date from file not found") from exc
+        with open(filename, "rb") as handle:
+            tags = exifread.process_file(handle, details=verbose)
 
-    with open(filename, "rb") as handle:
-        tags = exifread.process_file(handle, details=verbose)
+        if verbose:
+            tag_keys = [
+                "EXIF ExifVersion",
+                "EXIF PixelXDimension",
+                "Image XResolution",
+                "Image ImageDescription",
+                "Image DateTime",
+            ]
+            for key in tag_keys:
+                value = _exif_tag_value(tags, key)
+                if value is not None:
+                    print(f"{key.split(' ', 1)[-1]}: {value}")
 
-    if verbose:
-        tag_keys = [
-            "EXIF ExifVersion",
-            "EXIF PixelXDimension",
-            "Image XResolution",
-            "Image ImageDescription",
-            "Image DateTime",
-        ]
-        for key in tag_keys:
-            value = _exif_tag_value(tags, key)
-            if value is not None:
-                print(f"{key.split(' ', 1)[-1]}: {value}")
-
-    date_value = _exif_tag_value(tags, "Image DateTime")
-    if not date_value:
-        raise RuntimeError("Date from file not found")
-    try:
-        return datetime.strptime(date_value, "%Y:%m:%d %H:%M:%S")
-    except ValueError as exc:
-        raise RuntimeError("Date from file not found") from exc
+        date_value = _exif_tag_value(tags, "Image DateTime")
+        if date_value:
+            return datetime.strptime(date_value, "%Y:%m:%d %H:%M:%S")
+    except (ValueError, IsADirectoryError):
+        pass
+    except ImportError:
+        pass
+    
+    # Fallback: try filename
+    if filename_for_fallback:
+        parsed_date, pattern = parse_date_from_stem(filename_for_fallback)
+        if parsed_date is not None:
+            if verbose:
+                print(f"Date extracted from filename using pattern: {pattern}")
+            return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 0, 0, 0)
+    
+    raise RuntimeError("Date from file not found")
 
 
 def extract_date_from_filename(filename: str, verbose: bool) -> date:
@@ -272,7 +415,7 @@ def compute_file(entry: os.DirEntry, opts: Options, stats: Stats, ext_count: Ext
     date2 = date(2000, 1, 1)
 
     try:
-        date1 = extract_date(full_filename_from, opts.verbose)
+        date1 = extract_date(full_filename_from, opts.verbose, filename_for_fallback=filename_to)
         date1_present = True
     except RuntimeError as exc:
         print(f"WARN: {exc}")
