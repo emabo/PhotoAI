@@ -90,6 +90,35 @@ logger.info(
 SEARCH_CONTEXT_TTL_SEC = 30 * 60
 SEARCH_CONTEXTS: Dict[str, Dict[str, Any]] = {}
 
+SUPPORTED_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+    "image/heic",
+    "image/heif",
+    "video/mp4",
+    "video/x-msvideo",
+    "video/avi",
+    "video/mpeg",
+}
+
+VIDEO_MIME_TYPES = {
+    "video/mp4",
+    "video/x-msvideo",
+    "video/avi",
+    "video/mpeg",
+}
+
+VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".avi",
+    ".mpeg",
+    ".mpg",
+}
+
 
 # ---------------------------
 # Model + Chroma helpers
@@ -183,12 +212,22 @@ def embed_image(model, preprocess, device: str, image: Image.Image) -> List[floa
     return feats.detach().cpu().float().tolist()[0]
 
 
+def is_video_media(path: Path, mime: Optional[str] = None) -> bool:
+    mime_clean = (mime or "").strip().lower()
+    if mime_clean:
+        if mime_clean.startswith("video/"):
+            return True
+        if mime_clean in VIDEO_MIME_TYPES:
+            return True
+    return path.suffix.lower() in VIDEO_EXTENSIONS
+
+
 def ensure_thumb(sha1: str, img_path: Path, size: int = THUMB_SIZE, mime: Optional[str] = None) -> Optional[Path]:
     out = THUMB_DIR / f"{sha1}.jpg"
     if out.exists():
         return out
     # Use ffmpeg for video files
-    if mime and mime.startswith("video/"):
+    if is_video_media(img_path, mime):
         try:
             import subprocess
             scale_filter = f"scale={size}:{size}:force_original_aspect_ratio=decrease"
@@ -399,22 +438,25 @@ def resolve_image_path_from_rel(rel_path: Optional[str]) -> Optional[Path]:
 
 
 def fetch_distinct_mimes() -> List[str]:
-    if not SQLITE_DB_PATH.exists():
-        return []
-
-    con = sqlite_connect()
-    try:
-        rows = con.execute(
-            """
-            SELECT DISTINCT trim(mime) AS mime
-            FROM images
-            WHERE mime IS NOT NULL AND trim(mime) <> ''
-            ORDER BY lower(trim(mime)) ASC
-            """
-        ).fetchall()
-        return [str(r["mime"]) for r in rows if r["mime"]]
-    finally:
-        con.close()
+    db_mimes: set[str] = set()
+    if SQLITE_DB_PATH.exists():
+        con = sqlite_connect()
+        try:
+            rows = con.execute(
+                """
+                SELECT DISTINCT trim(mime) AS mime
+                FROM images
+                WHERE mime IS NOT NULL AND trim(mime) <> ''
+                ORDER BY lower(trim(mime)) ASC
+                """
+            ).fetchall()
+            db_mimes = {str(r["mime"]) for r in rows if r["mime"]}
+        finally:
+            con.close()
+    # Always include all supported MIME types so the filter is usable
+    # even before any file of that type has been indexed.
+    all_mimes = db_mimes | SUPPORTED_MIME_TYPES
+    return sorted(all_mimes, key=str.lower)
 
 
 def get_photo_detail(sha1: str) -> Optional[Dict[str, Any]]:
@@ -965,9 +1007,12 @@ def render_cards(ids: List[str], dists: List[float], metas: List[Dict[str, Any]]
             continue
 
         mime_str = str(meta.get("mime") or "").lower() or None
+        is_vid = is_video_media(p, mime_str)
         thumb = ensure_thumb(_id, p, mime=mime_str)
-        if not thumb:
+        if not thumb and not is_vid:
+            # Image thumbnail generation failed — skip the card
             continue
+        # Videos without a thumbnail still get a card (placeholder shown)
 
         # Prefer relpath for display; fallback to absolute
         display_path = meta.get("relpath") or meta.get("path") or str(p)
@@ -988,6 +1033,8 @@ def render_cards(ids: List[str], dists: List[float], metas: List[Dict[str, Any]]
                 "display_path": display_path,
                 "taken_at_str": taken_at_str,
                 "place_name": str(place_name),
+                "has_thumb": thumb is not None,
+                "is_video": is_vid,
             }
         )
 
@@ -1000,6 +1047,14 @@ def render_cards(ids: List[str], dists: List[float], metas: List[Dict[str, Any]]
         sid = row["sha1"]
         detail_href = f"/photo/{html_escape(sid)}?ctx={html_escape(ctx)}&pos={idx}"
 
+        if row["has_thumb"]:
+            thumb_html = f'<img class="thumb" src="/thumb/{html_escape(sid)}.jpg" alt="thumb" loading="lazy">'
+        else:
+            # Video without a pre-generated thumbnail
+            thumb_html = (
+                '<div class="thumb" style="display:flex;align-items:center;justify-content:center;'
+                'background:#111;color:#fff;font-size:2rem;">&#9654;</div>'
+            )
         cards.append(f"""
           <div class="card">
                         <label class="small" style="display:flex; align-items:center; gap:6px; margin-top:0;">
@@ -1007,7 +1062,7 @@ def render_cards(ids: List[str], dists: List[float], metas: List[Dict[str, Any]]
                             seleziona
                         </label>
                         <a href="{detail_href}" target="_blank" rel="noreferrer">
-              <img class="thumb" src="/thumb/{html_escape(sid)}.jpg" alt="thumb" loading="lazy">
+              {thumb_html}
             </a>
                         <div class="dist"><b>dist</b>: {row['dist_str']}</div>
             <div class="small">{html_escape(row['display_path'])}</div>
@@ -1023,6 +1078,7 @@ def render_cards(ids: List[str], dists: List[float], metas: List[Dict[str, Any]]
 def search_html(
     q: str = Query(default="", min_length=0),
     k: int = Query(default=DEFAULT_K, ge=1, le=MAX_K),
+    page: int = Query(default=1, ge=1),
     folder: str = Query(default="", min_length=0),
     mime: str = Query(default="", min_length=0),
     country_code: str = Query(default="", min_length=0),
@@ -1040,7 +1096,14 @@ def search_html(
     dist_map: Dict[str, float] = {}
     chroma_meta_map: Dict[str, Dict[str, Any]] = {}
 
-    if q:
+    # Videos are not embedded in Chroma (BASE_ONLY_MIME_TYPES).
+    # If the user explicitly filters by a video MIME type, bypass Chroma entirely
+    # so that all matching DB rows are returned regardless of embedding status.
+    mime_clean_for_check = (mime or "").strip().lower()
+    skip_chroma = mime_clean_for_check.startswith("video/") or mime_clean_for_check in VIDEO_MIME_TYPES
+    use_semantic_candidates = bool(q) and sort_by == "semantic" and not skip_chroma
+
+    if use_semantic_candidates:
         candidate_k = int(min(max(k * 5, 200), MAX_CANDIDATES))
         col = chroma_collection()
         vec = embed_text(MODEL, TOKENIZER, DEVICE, q)
@@ -1059,7 +1122,7 @@ def search_html(
             chroma_meta_map[sid] = meta or {}
 
     rows = fetch_images_filtered(
-        candidate_ids=candidate_ids,
+        candidate_ids=candidate_ids if use_semantic_candidates else None,
         folder=folder,
         mime=mime,
         country_code=country_code,
@@ -1074,22 +1137,31 @@ def search_html(
     if not rows:
         return "<div class='small'>Nessun risultato con i filtri correnti.</div>"
 
+    total_rows = len(rows)
     row_map = {r["sha1"]: r for r in rows}
 
-    if q and sort_by == "semantic":
-        ordered_ids = [sid for sid in (candidate_ids or []) if sid in row_map][:k]
-    elif sort_by == "date_desc":
-        ordered_rows = sorted(
-            rows,
-            key=lambda r: ((r["taken_at"] is None), -(r["taken_at"] or 0), r["path"] or ""),
-        )
-        ordered_ids = [r["sha1"] for r in ordered_rows[:k]]
-    else:
+    if use_semantic_candidates:
+        # Semantic ranking from Chroma distances
+        ordered_ids = [sid for sid in (candidate_ids or []) if sid in row_map]
+    elif sort_by == "date_asc":
         ordered_rows = sorted(
             rows,
             key=lambda r: ((r["taken_at"] is None), (r["taken_at"] or 0), r["path"] or ""),
         )
-        ordered_ids = [r["sha1"] for r in ordered_rows[:k]]
+        ordered_ids = [r["sha1"] for r in ordered_rows]
+    else:
+        # date_desc, or "semantic" with no query / with skip_chroma → show most recent first
+        ordered_rows = sorted(
+            rows,
+            key=lambda r: ((r["taken_at"] is None), -(r["taken_at"] or 0), r["path"] or ""),
+        )
+        ordered_ids = [r["sha1"] for r in ordered_rows]
+
+    total_pages = max(1, (len(ordered_ids) + k - 1) // k)
+    page = min(max(page, 1), total_pages)
+    start_idx = (page - 1) * k
+    end_idx = start_idx + k
+    ordered_ids = ordered_ids[start_idx:end_idx]
 
     out_ids: List[str] = []
     out_dists: List[float] = []
@@ -1122,7 +1194,26 @@ def search_html(
         out_dists.append(dist_map.get(sid, 0.0 if q else float("nan")))
         out_metas.append(meta)
 
-    return render_cards(out_ids, out_dists, out_metas)
+    cards_html = render_cards(out_ids, out_dists, out_metas)
+
+    start_label = start_idx + 1 if total_rows else 0
+    end_label = min(end_idx, total_rows)
+    pager_parts = [
+        f"<div class='small' style='margin:8px 0 12px 0;'>Risultati: {start_label}-{end_label} di {total_rows} • pagina {page}/{total_pages}</div>"
+    ]
+    if total_pages > 1:
+        prev_disabled = "disabled" if page <= 1 else ""
+        next_disabled = "disabled" if page >= total_pages else ""
+        prev_page = max(1, page - 1)
+        next_page = min(total_pages, page + 1)
+        pager_parts.append(
+            "<div class='row' style='margin: 0 0 12px 0;'>"
+            f"<button type='button' {prev_disabled} hx-get='/api/search_html?page={prev_page}' hx-include='#filters' hx-target='#results' style='padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer;'>← Precedenti</button>"
+            f"<button type='button' {next_disabled} hx-get='/api/search_html?page={next_page}' hx-include='#filters' hx-target='#results' style='padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer;'>Successivi →</button>"
+            "</div>"
+        )
+
+    return "".join(pager_parts) + cards_html
 
 
 @app.post("/api/delete_images")
@@ -1151,7 +1242,8 @@ def photo_detail(
 
         image = detail["image"]
         mime_value = str(image["mime"] or "").lower()
-        is_video = mime_value.startswith("video/")
+        rel_path = image["path"] or ""
+        is_video = is_video_media(Path(str(rel_path)), mime_value)
         caption = detail["caption"]
         tags = detail["tags"]
         jobs = detail["jobs"]
@@ -1392,7 +1484,8 @@ def photo_viewer(
 
         image = detail["image"]
         mime_value = str(image["mime"] or "").lower()
-        is_video = mime_value.startswith("video/")
+        rel_path = image["path"] or ""
+        is_video = is_video_media(Path(str(rel_path)), mime_value)
         prev_sha1 = detail["prev_sha1"]
         next_sha1 = detail["next_sha1"]
         current_pos = -1
