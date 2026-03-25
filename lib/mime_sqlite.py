@@ -55,7 +55,9 @@ def sqlite_connect(db_path: Path) -> sqlite3.Connection:
 
 
 def detect_mime(path: Path) -> Optional[str]:
-    guessed, _enc = mimetypes.guess_type(str(path), strict=False)
+    # mimetypes.guess_type is case-sensitive on Linux; normalise the extension
+    path_for_guess = path.with_suffix(path.suffix.lower())
+    guessed, _enc = mimetypes.guess_type(str(path_for_guess), strict=False)
     if guessed:
         return guessed
 
