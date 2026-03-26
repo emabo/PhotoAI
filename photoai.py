@@ -5,9 +5,14 @@ import argparse
 import hashlib
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from dotenv import load_dotenv
 from PIL import Image
@@ -16,6 +21,12 @@ import chromadb
 import open_clip
 import torch
 from chromadb.config import Settings
+from lib.media_types import (
+    BASE_ONLY_MIME_TYPES,
+    SUPPORTED_MIME_TYPES,
+    is_base_only_mime,
+    is_supported_mime,
+)
 
 try:
     from pillow_heif import register_heif_opener
@@ -45,29 +56,6 @@ def sha1_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
                 break
             h.update(b)
     return h.hexdigest()
-
-
-SUPPORTED_MIME_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "image/bmp",
-    "image/tiff",
-    "image/heic",
-    "image/heif",
-    "video/mp4",
-    "video/x-msvideo",
-    "video/avi",
-    "video/mpeg",
-}
-
-BASE_ONLY_MIME_TYPES = {
-    "video/mp4",
-    "video/x-msvideo",
-    "video/avi",
-    "video/mpeg",
-}
 
 
 def detect_mime(path: Path) -> Optional[str]:
@@ -679,7 +667,7 @@ def run_sync_missing_photos_dir(
                 mtime = float(st.st_mtime)
                 mime = detect_mime(img_path)
 
-                if mime not in SUPPORTED_MIME_TYPES:
+                if not is_supported_mime(mime):
                     skipped_unsupported_count += 1
                     if not summary_only:
                         print(f"[SKIP] {relpath} -> unsupported mime: {mime or 'unknown'}")
@@ -688,7 +676,7 @@ def run_sync_missing_photos_dir(
                 sha1 = sha1_file(img_path)
                 w, h = read_image_size(img_path)
 
-                if mime in BASE_ONLY_MIME_TYPES:
+                if is_base_only_mime(mime):
                     video_meta = probe_video_metadata(img_path)
                     w = int(video_meta.get("w") or w or 0)
                     h = int(video_meta.get("h") or h or 0)
@@ -1168,7 +1156,7 @@ def process_one_base_media(
     if mime is None:
         mime = detect_mime(img_path)
 
-    if mime not in BASE_ONLY_MIME_TYPES:
+    if not is_base_only_mime(mime):
         raise RuntimeError(f"Unsupported base-only mime: {mime or 'unknown'}")
 
     def safe_job_state(status: str, detail: str) -> None:
@@ -1395,7 +1383,7 @@ def process_one_image(
     from lib import chroma_image_index as idxmod
 
     mime = detect_mime(img_path)
-    if mime in BASE_ONLY_MIME_TYPES:
+    if is_base_only_mime(mime):
         return process_one_base_media(
             con=con,
             img_path=img_path,

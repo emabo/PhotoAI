@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
+import os
 import mimetypes
 import sqlite3
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from lib.media_types import normalize_mime
 
 def must_env(name: str) -> str:
     value = os.environ.get(name)
@@ -59,7 +66,7 @@ def detect_mime(path: Path) -> Optional[str]:
     path_for_guess = path.with_suffix(path.suffix.lower())
     guessed, _enc = mimetypes.guess_type(str(path_for_guess), strict=False)
     if guessed:
-        return guessed
+        return normalize_mime(guessed)
 
     try:
         from PIL import Image
@@ -73,7 +80,7 @@ def detect_mime(path: Path) -> Optional[str]:
         with Image.open(path) as img:
             fmt = (img.format or "").upper()
         if fmt:
-            return Image.MIME.get(fmt)
+            return normalize_mime(Image.MIME.get(fmt))
     except Exception:
         return None
 

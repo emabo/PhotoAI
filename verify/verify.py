@@ -8,23 +8,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Any, Optional, Dict, Set
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from dotenv import load_dotenv
-
-
-SUPPORTED_MIME_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "image/bmp",
-    "image/tiff",
-    "image/heic",
-    "image/heif",
-    "video/mp4",
-    "video/x-msvideo",
-    "video/avi",
-    "video/mpeg",
-}
+from lib.media_types import is_supported_mime
 
 
 def must_env(name: str) -> str:
@@ -287,7 +276,7 @@ def run_filesystem_mapping_prospect(con: sqlite3.Connection) -> None:
                 unknown_examples.append((ext, rel))
             continue
 
-        if mime not in SUPPORTED_MIME_TYPES:
+        if not is_supported_mime(mime):
             unsupported_ext_counts[ext] = unsupported_ext_counts.get(ext, 0) + 1
             if len(unsupported_examples) < 30:
                 unsupported_examples.append((ext, mime, rel))
@@ -347,7 +336,7 @@ def run_filesystem_mapping_prospect(con: sqlite3.Connection) -> None:
         mime = _mime_for_unmapped_file(abs_path)
         unmapped_mime_counts[mime] = unmapped_mime_counts.get(mime, 0) + 1
 
-        if mime not in SUPPORTED_MIME_TYPES:
+        if not is_supported_mime(mime):
             unsupported_unmapped_count += 1
             continue
 

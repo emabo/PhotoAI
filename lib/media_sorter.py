@@ -4,23 +4,21 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from lib.filename_date_parser import (
     parse_datetime_from_stem,
     parse_date_from_stem,
 )
-
-# Video MIME types that should be handled as "base-only" with video metadata extraction
-BASE_ONLY_MIME_TYPES = {
-    "video/mp4",
-    "video/x-msvideo",
-    "video/avi",
-    "video/mpeg",
-}
+from lib.media_types import is_base_only_mime
 
 
 @dataclass
@@ -312,7 +310,7 @@ def extract_date(filename: str, verbose: bool, filename_for_fallback: Optional[s
     mime = detect_mime(path)
     
     # Try video extraction if it looks like a video
-    if mime and mime in BASE_ONLY_MIME_TYPES:
+    if is_base_only_mime(mime):
         video_date = extract_date_from_video(filename, verbose)
         if video_date:
             return video_date

@@ -11,23 +11,12 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from dotenv import load_dotenv
-
-
-SUPPORTED_MIME_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "image/bmp",
-    "image/tiff",
-    "image/heic",
-    "image/heif",
-    "video/mp4",
-    "video/x-msvideo",
-    "video/avi",
-    "video/mpeg",
-}
+from lib.media_types import is_supported_mime
 
 
 def must_env(name: str) -> str:
@@ -286,7 +275,7 @@ def main() -> int:
                 db_rel = sha1_to_db_path.get(file_sha1, "(path_db_mancante)")
                 print(f"[DB-MISSING-OR-EMPTY] {rel_path} -> {db_rel}")
 
-            if mime not in SUPPORTED_MIME_TYPES:
+            if not is_supported_mime(mime):
                 unsupported_seen += 1
                 if filename_index:
                     matched_path = find_same_name_same_sha1(

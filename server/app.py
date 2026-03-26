@@ -8,9 +8,14 @@ import sqlite3
 import uuid
 import warnings
 import logging
+import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from fastapi import FastAPI, Query, UploadFile, File, HTTPException, Body
 from fastapi.responses import HTMLResponse, FileResponse, Response
@@ -22,6 +27,7 @@ import torch
 import open_clip
 from PIL import Image, ImageFile, ImageOps
 from dotenv import load_dotenv
+from lib.media_types import SUPPORTED_MIME_TYPES, VIDEO_EXTENSIONS, is_video_mime
 
 try:
     from pillow_heif import register_heif_opener
@@ -89,36 +95,6 @@ logger.info(
 
 SEARCH_CONTEXT_TTL_SEC = 30 * 60
 SEARCH_CONTEXTS: Dict[str, Dict[str, Any]] = {}
-
-SUPPORTED_MIME_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "image/bmp",
-    "image/tiff",
-    "image/heic",
-    "image/heif",
-    "video/mp4",
-    "video/x-msvideo",
-    "video/avi",
-    "video/mpeg",
-}
-
-VIDEO_MIME_TYPES = {
-    "video/mp4",
-    "video/x-msvideo",
-    "video/avi",
-    "video/mpeg",
-}
-
-VIDEO_EXTENSIONS = {
-    ".mp4",
-    ".avi",
-    ".mpeg",
-    ".mpg",
-}
-
 
 # ---------------------------
 # Model + Chroma helpers
@@ -215,9 +191,7 @@ def embed_image(model, preprocess, device: str, image: Image.Image) -> List[floa
 def is_video_media(path: Path, mime: Optional[str] = None) -> bool:
     mime_clean = (mime or "").strip().lower()
     if mime_clean:
-        if mime_clean.startswith("video/"):
-            return True
-        if mime_clean in VIDEO_MIME_TYPES:
+        if is_video_mime(mime_clean):
             return True
     return path.suffix.lower() in VIDEO_EXTENSIONS
 
@@ -1100,7 +1074,7 @@ def search_html(
     # If the user explicitly filters by a video MIME type, bypass Chroma entirely
     # so that all matching DB rows are returned regardless of embedding status.
     mime_clean_for_check = (mime or "").strip().lower()
-    skip_chroma = mime_clean_for_check.startswith("video/") or mime_clean_for_check in VIDEO_MIME_TYPES
+    skip_chroma = is_video_mime(mime_clean_for_check)
     use_semantic_candidates = bool(q) and sort_by == "semantic" and not skip_chroma
 
     if use_semantic_candidates:
@@ -1737,8 +1711,7 @@ def img(sha1: str):
         except Exception as e:
             raise HTTPException(500, f"cannot convert HEIC/HEIF: {e}")
 
-    # This serves the actual image. Keep the server bound to localhost.
-    # You can also add content-type guessing, but FileResponse handles it decently.
+    # This serves the original media file. Keep the server bound to localhost.
     if db_mime:
         return FileResponse(str(p), media_type=db_mime)
     return FileResponse(str(p))
