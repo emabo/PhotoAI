@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+from urllib.parse import urlencode, quote_plus
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -805,9 +806,9 @@ def index():
             <div class="row">
                 <input id="k" type="number" name="k" value="{DEFAULT_K}" min="1" max="{MAX_K}" title="Numero risultati (k)" />
                 <select id="sort_by" name="sort_by" style="padding: 10px 12px; border: 1px solid #ccc; border-radius: 10px;">
-                    <option value="semantic" selected>Sort: semantic</option>
+                    <option value="semantic">Sort: semantic</option>
                     <option value="date_desc">Sort: data ↓</option>
-                    <option value="date_asc">Sort: data ↑</option>
+                    <option value="date_asc" selected>Sort: data ↑</option>
                 </select>
             </div>
         </form>
@@ -875,6 +876,8 @@ def index():
             const deleteConfirmBtn = document.getElementById("delete-confirm-btn");
             const results = document.getElementById("results");
             const filters = document.getElementById("filters");
+            const qInput = document.getElementById("q");
+            const sortByInput = document.getElementById("sort_by");
 
             function updateSelectionUI() {{
                 const n = selected.size;
@@ -962,6 +965,61 @@ def index():
                 if (target && target.id === "results") applySelectionToDOM();
             }});
 
+            function syncSortWithSemanticQuery() {{
+                if (!(qInput instanceof HTMLInputElement) || !(sortByInput instanceof HTMLSelectElement)) return;
+                const hasQuery = !!(qInput.value || "").trim();
+                if (hasQuery && sortByInput.value !== "semantic") {{
+                    sortByInput.value = "semantic";
+                }} else if (!hasQuery && sortByInput.value === "semantic") {{
+                    sortByInput.value = "date_asc";
+                }}
+            }}
+
+            if (qInput instanceof HTMLInputElement) {{
+                qInput.addEventListener("input", syncSortWithSemanticQuery);
+            }}
+
+            function restoreFromUrlAndSearch() {{
+                const params = new URLSearchParams(window.location.search || "");
+                if (!params.toString()) return;
+
+                const setValue = (id, key) => {{
+                    const el = document.getElementById(id);
+                    if (!el || !(el instanceof HTMLInputElement || el instanceof HTMLSelectElement)) return;
+                    if (!params.has(key)) return;
+                    el.value = params.get(key) || "";
+                }};
+
+                setValue("q", "q");
+                setValue("folder", "folder");
+                setValue("mime", "mime");
+                setValue("city", "city");
+                setValue("region", "region");
+                setValue("country_code", "country_code");
+                setValue("date_from", "date_from");
+                setValue("date_to", "date_to");
+                setValue("k", "k");
+                setValue("sort_by", "sort_by");
+
+                const setChecked = (name, key) => {{
+                    const el = document.querySelector(`input[name="${{name}}"]`);
+                    if (!(el instanceof HTMLInputElement)) return;
+                    const v = (params.get(key) || "").toLowerCase();
+                    el.checked = v === "true" || v === "1" || v === "on" || v === "yes";
+                }};
+
+                setChecked("has_caption_en", "has_caption_en");
+                setChecked("only_complete", "only_complete");
+
+                const target = "/api/search_html?" + params.toString();
+                if (window.htmx) {{
+                    window.htmx.ajax("GET", target, {{ target: "#results", swap: "innerHTML" }});
+                }}
+            }}
+
+            restoreFromUrlAndSearch();
+            syncSortWithSemanticQuery();
+
             updateSelectionUI();
         }})();
     </script>
@@ -970,7 +1028,12 @@ def index():
 """
 
 
-def render_cards(ids: List[str], dists: List[float], metas: List[Dict[str, Any]]) -> str:
+def render_cards(
+    ids: List[str],
+    dists: List[float],
+    metas: List[Dict[str, Any]],
+    return_query: str = "",
+) -> str:
     rows_data: List[Dict[str, Any]] = []
     for _id, dist, meta in zip(ids, dists, metas):
         meta = meta or {}
@@ -1022,6 +1085,8 @@ def render_cards(ids: List[str], dists: List[float], metas: List[Dict[str, Any]]
     for idx, row in enumerate(rows_data):
         sid = row["sha1"]
         detail_href = f"/photo/{html_escape(sid)}?ctx={html_escape(ctx)}&pos={idx}"
+        if return_query:
+            detail_href += f"&ret={quote_plus(return_query)}"
 
         if row["has_thumb"]:
             thumb_html = f'<img class="thumb" src="/thumb/{html_escape(sid)}.jpg" alt="thumb" loading="lazy">'
@@ -1064,7 +1129,7 @@ def search_html(
     date_to: str = Query(default="", min_length=0),
     has_caption_en: bool = Query(default=False),
     only_complete: bool = Query(default=False),
-    sort_by: str = Query(default="semantic", pattern="^(semantic|date_desc|date_asc)$"),
+    sort_by: str = Query(default="date_asc", pattern="^(semantic|date_desc|date_asc)$"),
 ):
     q = (q or "").strip()
     effective_sort_by = sort_by
@@ -1146,6 +1211,25 @@ def search_html(
     out_dists: List[float] = []
     out_metas: List[Dict[str, Any]] = []
 
+    return_query = urlencode(
+        {
+            "q": q,
+            "k": k,
+            "page": page,
+            "folder": folder,
+            "mime": mime,
+            "country_code": country_code,
+            "region": region,
+            "city": city,
+            "date_from": date_from,
+            "date_to": date_to,
+            "has_caption_en": str(bool(has_caption_en)).lower(),
+            "only_complete": str(bool(only_complete)).lower(),
+            "sort_by": sort_by,
+        },
+        doseq=False,
+    )
+
     for sid in ordered_ids:
         r = row_map.get(sid)
         if not r:
@@ -1173,7 +1257,7 @@ def search_html(
         out_dists.append(dist_map.get(sid, 0.0 if q else float("nan")))
         out_metas.append(meta)
 
-    cards_html = render_cards(out_ids, out_dists, out_metas)
+    cards_html = render_cards(out_ids, out_dists, out_metas, return_query=return_query)
 
     start_label = start_idx + 1 if total_rows else 0
     end_label = min(end_idx, total_rows)
@@ -1214,6 +1298,7 @@ def photo_detail(
     sha1: str,
     ctx: str = Query(default="", min_length=0),
     pos: int = Query(default=-1),
+    ret: str = Query(default="", min_length=0),
 ):
         detail = get_photo_detail(sha1)
         if not detail:
@@ -1284,13 +1369,22 @@ def photo_detail(
         original_href = f"/viewer/{html_escape(sha1)}"
         if ctx_ids and current_pos >= 0:
             original_href = f"/viewer/{html_escape(sha1)}?ctx={html_escape(ctx)}&pos={current_pos}"
+        if ret:
+            sep = "&" if "?" in original_href else "?"
+            original_href = f"{original_href}{sep}ret={quote_plus(ret)}"
+
+        home_href = f"/?{ret}" if ret else "/"
 
         def nav_href(target_sha1: Optional[str], target_pos: int) -> Optional[str]:
             if not target_sha1:
                 return None
             if ctx_ids:
-                return f"/photo/{html_escape(target_sha1)}?ctx={html_escape(ctx)}&pos={target_pos}"
-            return f"/photo/{html_escape(target_sha1)}"
+                href = f"/photo/{html_escape(target_sha1)}?ctx={html_escape(ctx)}&pos={target_pos}"
+            else:
+                href = f"/photo/{html_escape(target_sha1)}"
+            if ret:
+                href += f"&ret={quote_plus(ret)}" if "?" in href else f"?ret={quote_plus(ret)}"
+            return href
 
         nav_pos = current_pos if current_pos >= 0 else pos
         prev_href = nav_href(prev_sha1, (nav_pos - 1) if nav_pos > 0 else -1)
@@ -1347,7 +1441,7 @@ def photo_detail(
 </head>
 <body>
     <div class="top">
-        <a class='btn' href='/' onclick="if (window.history.length > 1) {{ window.history.back(); return false; }}">⌂ Home</a>
+        <a class='btn' href='{home_href}'>⌂ Home</a>
         {first_btn}
         {prev_btn}
         {next_btn}
@@ -1465,6 +1559,7 @@ def photo_viewer(
         sha1: str,
         ctx: str = Query(default="", min_length=0),
         pos: int = Query(default=-1),
+    ret: str = Query(default="", min_length=0),
 ):
         detail = get_photo_detail(sha1)
         if not detail:
@@ -1510,8 +1605,12 @@ def photo_viewer(
             if not target_sha1:
                 return ""
             if ctx_ids and target_pos >= 0:
-                return f"/viewer/{html_escape(target_sha1)}?ctx={html_escape(ctx)}&pos={target_pos}"
-            return f"/viewer/{html_escape(target_sha1)}"
+                href = f"/viewer/{html_escape(target_sha1)}?ctx={html_escape(ctx)}&pos={target_pos}"
+            else:
+                href = f"/viewer/{html_escape(target_sha1)}"
+            if ret:
+                href += f"&ret={quote_plus(ret)}" if "?" in href else f"?ret={quote_plus(ret)}"
+            return href
 
         prev_href = viewer_href(prev_sha1, (current_pos - 1) if current_pos > 0 else -1)
         next_href = viewer_href(next_sha1, (current_pos + 1) if current_pos >= 0 else -1)
@@ -1520,6 +1619,10 @@ def photo_viewer(
         back_href = f"/photo/{html_escape(sha1)}"
         if ctx_ids and current_pos >= 0:
             back_href = f"/photo/{html_escape(sha1)}?ctx={html_escape(ctx)}&pos={current_pos}"
+        if ret:
+            back_href += f"&ret={quote_plus(ret)}" if "?" in back_href else f"?ret={quote_plus(ret)}"
+
+        home_href = f"/?{ret}" if ret else "/"
 
         media_html = (
             f"<video id='viewer-media' class='viewer-media' src='/img/{html_escape(sha1)}' controls playsinline autoplay preload='metadata'></video>"
@@ -1548,7 +1651,7 @@ def photo_viewer(
 <body>
     <div class="top">
         <div style="display:flex; gap:8px;">
-            <a class="btn" href="/" onclick="if (window.history.length > 1) {{ window.history.back(); return false; }}">⌂ Home</a>
+            <a class="btn" href="{home_href}">⌂ Home</a>
             <a class="btn" href="{back_href}">← Dettaglio</a>
         </div>
         <div style="display:flex; gap:8px;">
