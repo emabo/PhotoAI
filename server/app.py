@@ -1069,6 +1069,9 @@ def search_html(
     sort_by: str = Query(default="semantic", pattern="^(semantic|date_desc|date_asc)$"),
 ):
     q = (q or "").strip()
+    effective_sort_by = sort_by
+    if not q and sort_by == "semantic":
+        effective_sort_by = "date_asc"
 
     candidate_ids: Optional[List[str]] = None
     dist_map: Dict[str, float] = {}
@@ -1079,7 +1082,7 @@ def search_html(
     # so that all matching DB rows are returned regardless of embedding status.
     mime_clean_for_check = (mime or "").strip().lower()
     skip_chroma = is_video_mime(mime_clean_for_check)
-    use_semantic_candidates = bool(q) and sort_by == "semantic" and not skip_chroma
+    use_semantic_candidates = bool(q) and effective_sort_by == "semantic" and not skip_chroma
 
     if use_semantic_candidates:
         candidate_k = int(min(max(k * 5, 200), MAX_CANDIDATES))
@@ -1121,7 +1124,7 @@ def search_html(
     if use_semantic_candidates:
         # Semantic ranking from Chroma distances
         ordered_ids = [sid for sid in (candidate_ids or []) if sid in row_map]
-    elif sort_by == "date_asc":
+    elif effective_sort_by == "date_asc":
         ordered_rows = sorted(
             rows,
             key=lambda r: ((r["taken_at"] is None), (r["taken_at"] or 0), r["path"] or ""),
@@ -1346,7 +1349,7 @@ def photo_detail(
 </head>
 <body>
     <div class="top">
-        <a class='btn' href='/'>⌂ Home</a>
+        <a class='btn' href='/' onclick="if (window.history.length > 1) {{ window.history.back(); return false; }}">⌂ Home</a>
         {first_btn}
         {prev_btn}
         {next_btn}
@@ -1547,7 +1550,7 @@ def photo_viewer(
 <body>
     <div class="top">
         <div style="display:flex; gap:8px;">
-            <a class="btn" href="/">⌂ Home</a>
+            <a class="btn" href="/" onclick="if (window.history.length > 1) {{ window.history.back(); return false; }}">⌂ Home</a>
             <a class="btn" href="{back_href}">← Dettaglio</a>
         </div>
         <div style="display:flex; gap:8px;">
