@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import os
 import sqlite3
 import sys
@@ -50,6 +51,10 @@ def connect_db() -> Tuple[sqlite3.Connection, Path]:
 
 def normalize_relpath(path: str) -> str:
     return str(path or "").replace("\\", "/").strip().strip("/")
+
+
+def has_wildcards(value: str) -> bool:
+    return any(ch in value for ch in ("*", "?", "["))
 
 
 def format_ts(value: float) -> str:
@@ -223,6 +228,41 @@ def find_candidate_by_path(
     )
 
 
+def resolve_relpaths_from_selectors(
+    con: sqlite3.Connection,
+    photos_dir: Path,
+    selectors: Set[str],
+) -> List[str]:
+    relpaths: Set[str] = set()
+
+    db_rows = con.execute("SELECT path FROM images WHERE path IS NOT NULL AND trim(path) <> ''").fetchall()
+    db_paths = [normalize_relpath(str(r["path"] or "")) for r in db_rows]
+    db_paths = [p for p in db_paths if p]
+
+    for selector in selectors:
+        if not selector:
+            continue
+
+        if has_wildcards(selector):
+            for abs_path in photos_dir.glob(selector):
+                if not abs_path.is_file():
+                    continue
+                try:
+                    rel = normalize_relpath(str(abs_path.resolve().relative_to(photos_dir)))
+                except ValueError:
+                    continue
+                if rel:
+                    relpaths.add(rel)
+
+            for db_path in db_paths:
+                if fnmatch.fnmatch(db_path, selector):
+                    relpaths.add(db_path)
+        else:
+            relpaths.add(selector)
+
+    return sorted(relpaths)
+
+
 def remove_candidate(
     con: sqlite3.Connection,
     candidate: RemovalCandidate,
@@ -299,7 +339,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Rimuove file dal filesystem, SQLite, Chroma e thumbs. "
-            "Con --error scorre i file con job in errore; senza --error richiede un solo --path."
+            "Con --error scorre i file con job in errore; senza --error usa --path anche con wildcard."
         ),
     )
     ap.add_argument("--error", action="store_true", help="Scorri interattivamente i file che hanno job in errore")
@@ -309,7 +349,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if not args.error and not args.path:
-        print("ERROR: specify --error or exactly one --path", file=sys.stderr)
+        print("ERROR: specify --error or at least one --path", file=sys.stderr)
         ap.print_help(sys.stderr)
         return 2
 
@@ -324,9 +364,6 @@ def main() -> int:
     if args.error:
         pass
     else:
-        if len(only_paths) != 1:
-            print("ERROR: without --error you must specify exactly one --path", file=sys.stderr)
-            return 2
         if args.limit:
             print("ERROR: --limit can be used only with --error", file=sys.stderr)
             return 2
@@ -382,15 +419,47 @@ def main() -> int:
                     chroma_warnings += 1
                     print(f"WARN Chroma: {chroma_error}", file=sys.stderr)
         else:
-            relpath = next(iter(only_paths))
-            candidate = find_candidate_by_path(con, photos_dir, thumb_dir, relpath)
-            print_candidate(1, 1, candidate)
-            answer = ask_action("Rimuovere questo file da DB/fs/chroma/thumb? [y]es / [n]o / [q]uit: ")
-            if answer in {"n", "q"}:
-                skipped = 1
-            else:
+            relpaths = resolve_relpaths_from_selectors(con, photos_dir, only_paths)
+            if not relpaths:
+                print("Nessun file trovato con i path/wildcard specificati.")
+                return 0
+
+            candidates: List[RemovalCandidate] = []
+            not_found: List[str] = []
+            for relpath in relpaths:
+                try:
+                    candidates.append(find_candidate_by_path(con, photos_dir, thumb_dir, relpath))
+                except RuntimeError:
+                    not_found.append(relpath)
+
+            if not candidates:
+                print("Nessun candidato valido da rimuovere.")
+                if not_found:
+                    print("Path non risolti:")
+                    for p in not_found[:30]:
+                        print(f"  - {p}")
+                return 0
+
+            print(f"Candidati : {len(candidates)}")
+            if not_found:
+                print(f"Path non risolti: {len(not_found)}")
+
+            yes_to_all = False
+            for idx, candidate in enumerate(candidates, start=1):
+                print_candidate(idx, len(candidates), candidate)
+                answer = "y" if yes_to_all else ask_action(
+                    "Rimuovere questo file da DB/fs/chroma/thumb? [y]es / [n]o / [a]ll / [q]uit: "
+                )
+                if answer == "q":
+                    break
+                if answer == "n":
+                    skipped += 1
+                    continue
+                if answer == "a":
+                    yes_to_all = True
+
                 actions, chroma_error = remove_candidate(con, candidate, photos_dir, thumb_dir, args.dry_run)
-                removed = 1
+                removed += 1
                 print("Azioni:")
                 for action in actions:
                     print(f"  - {action}")

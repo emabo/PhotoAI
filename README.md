@@ -52,6 +52,7 @@ verify/
   verify.py                         # full DB/filesystem/Chroma audit
   resolve_same_sha1_files.py        # interactive duplicate resolution
   copy_files_missing_from_db.py     # copy files missing from DB while preserving relpath
+  remove_files.py                   # interactive removal from filesystem/DB/Chroma/thumbs
 ```
 
 ---
@@ -493,6 +494,40 @@ The script also reports:
 
 ---
 
+## 9) `verify/remove_files.py`
+
+Interactive removal utility to delete media consistently across filesystem, SQLite, Chroma, and thumbnails.
+
+### What it does
+
+- removes original files from `PHOTOAI_PHOTOS_DIR`
+- removes corresponding thumbnail cache entries
+- removes linked rows from SQLite (`images`, `jobs`, `tags`, `captions`, `captions_fts`)
+- removes entries from Chroma image/captions collections
+
+### Main modes
+
+- `--error`: iterates files with `jobs.status='error'` and asks confirmation per file
+- without `--error`: removes files selected by `--path` (supports wildcard selectors)
+
+### Examples
+
+```bash
+# interactive cleanup of error files
+python verify/remove_files.py --error
+
+# cleanup only error files under a path selector
+python verify/remove_files.py --error --path '2024/**/*.mp4'
+
+# remove selected files (wildcard) with confirmation per file
+python verify/remove_files.py --path '2024/**/*.jpg'
+
+# dry-run preview
+python verify/remove_files.py --error --dry-run
+```
+
+---
+
 ## Internal modules (`lib/`)
 
 These files are not intended as public CLI tools, but they are the internal engine of the project.
@@ -570,6 +605,12 @@ python verify/resolve_same_sha1_files.py
 python verify/copy_files_missing_from_db.py --from /mnt/source --to /mnt/recovery --dry-run
 ```
 
+## Workflow G — Remove broken/error files
+
+```bash
+python verify/remove_files.py --error
+```
+
 ---
 
 ## Notes on video geolocation
@@ -633,6 +674,20 @@ or:
 
 ```bash
 python verify/resolve_same_sha1_files.py
+```
+
+### remove files across DB + Chroma + thumbs
+
+Use:
+
+```bash
+python verify/remove_files.py --error
+```
+
+or target specific path selectors:
+
+```bash
+python verify/remove_files.py --path '2024/**/*.mp4'
 ```
 
 ---
