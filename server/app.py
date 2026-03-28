@@ -1271,6 +1271,14 @@ def photo_detail(
                 first_sha1 = ctx_ids[0] if ctx_ids else None
                 last_sha1 = ctx_ids[-1] if ctx_ids else None
                 current_pos = idx
+            else:
+                # Context was provided but this item is not part of it:
+                # avoid falling back to global DB ordering.
+                prev_sha1 = None
+                next_sha1 = None
+                first_sha1 = None
+                last_sha1 = None
+                current_pos = -1
 
         original_href = f"/viewer/{html_escape(sha1)}"
         if ctx_ids and current_pos >= 0:
@@ -1488,6 +1496,14 @@ def photo_viewer(
                 first_sha1 = ctx_ids[0] if ctx_ids else None
                 last_sha1 = ctx_ids[-1] if ctx_ids else None
                 current_pos = idx
+            else:
+                # Context was provided but this item is not part of it:
+                # avoid falling back to global DB ordering.
+                prev_sha1 = None
+                next_sha1 = None
+                first_sha1 = None
+                last_sha1 = None
+                current_pos = -1
 
         def viewer_href(target_sha1: Optional[str], target_pos: int) -> str:
             if not target_sha1:
