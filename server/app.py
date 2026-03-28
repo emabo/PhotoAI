@@ -424,7 +424,11 @@ def fetch_distinct_mimes() -> List[str]:
                 ORDER BY lower(trim(mime)) ASC
                 """
             ).fetchall()
-            db_mimes = {str(r["mime"]) for r in rows if r["mime"]}
+            db_mimes = {
+                str(r["mime"]).strip().lower()
+                for r in rows
+                if r["mime"] and str(r["mime"]).strip().lower() in SUPPORTED_MIME_TYPES
+            }
         finally:
             con.close()
     # Always include all supported MIME types so the filter is usable

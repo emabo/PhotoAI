@@ -15,7 +15,7 @@ The project is designed to:
 ## Main features
 
 - ingest images and videos from a source directory
-- support for JPEG, PNG, GIF, WebP, BMP, TIFF, HEIC/HEIF, MP4, AVI, and MPEG
+- support for JPEG, PNG, GIF, WebP, BMP, TIFF, HEIC/HEIF, and MP4
 - extraction of `sha1`, dimensions, video duration, MIME, `taken_at`, and GPS
 - GPS parsing from MP4 QuickTime / ISO6709 metadata
 - locality enrichment (`country`, `region`, `city`, `place_name`) via GeoNames
@@ -65,7 +65,7 @@ Recommended:
 - Linux
 - Python 3.11 or 3.12
 - `ffmpeg` and `ffprobe` available in `PATH`
-- optional: `exiftool` available in `PATH` (extra fallback metadata for some AVI/MPEG files)
+- optional: `exiftool` available in `PATH` (extra fallback metadata for uncommon or legacy media files)
 - optional CUDA GPU for embeddings and captioning
 
 ### Python dependencies
@@ -88,7 +88,7 @@ Notes:
 - `transformers`, `accelerate`, and `sentencepiece` are required for captioning/translation.
 - `scipy` is recommended for fast geographic lookup using KDTree.
 - `ffmpeg`/`ffprobe` are required for video thumbnails and primary video metadata parsing.
-- `exiftool` is optional but recommended as fallback metadata reader (especially useful on some AVI/MPEG files).
+- `exiftool` is optional but recommended as fallback metadata reader for uncommon or legacy files.
 
 ---
 
@@ -257,8 +257,8 @@ python photoai.py --sync-missing --sync-subdir 2024/08 --sync-mime image/jpeg --
 
 ### Important notes
 
-- MP4/AVI/MPEG files are treated as `base-only mime`: they receive metadata, thumbnails, GPS, and locality enrichment, but not full photo-style captioning
-- MP4/AVI/MPEG videos can also provide GPS via QuickTime/ISO6709 tags when available
+- MP4 files are treated as `base-only mime`: they receive metadata, thumbnails, GPS, and locality enrichment, but not full photo-style captioning
+- MP4 videos can also provide GPS via QuickTime/ISO6709 tags when available
 - `--sync-missing` uses the same GPS/locality enrichment logic as the normal ingest flow
 
 ---
@@ -523,8 +523,6 @@ The currently supported MIME types in code are:
 - `image/heic`
 - `image/heif`
 - `video/mp4`
-- `video/x-msvideo` (AVI)
-- `video/mpeg` (MPEG/MPG)
 
 ---
 
@@ -576,7 +574,7 @@ python verify/copy_files_missing_from_db.py --from /mnt/source --to /mnt/recover
 
 ## Notes on video geolocation
 
-PhotoAI can extract the following from MP4/AVI/MPEG files:
+PhotoAI can extract the following from MP4 files:
 
 - video dimensions
 - duration
@@ -602,9 +600,9 @@ This works both in the normal ingest flow and in `--sync-missing` mode.
 
 Install FFmpeg and make sure the binaries are available in `PATH`.
 
-### limited metadata on AVI/MPEG
+### limited metadata on legacy files
 
-Some AVI/MPEG files do not expose rich metadata through FFmpeg tags alone.
+Some legacy files may not expose rich metadata through FFmpeg tags alone.
 
 - install `exiftool` and keep it in `PATH` to enable fallback extraction for duration/date/GPS when present
 
