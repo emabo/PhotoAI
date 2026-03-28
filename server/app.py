@@ -1039,7 +1039,7 @@ def render_cards(ids: List[str], dists: List[float], metas: List[Dict[str, Any]]
                             <input type="checkbox" class="photo-select" data-sha1="{html_escape(sid)}" data-path="{html_escape(str(row['display_path']))}" />
                             seleziona
                         </label>
-                        <a href="{detail_href}" target="_blank" rel="noreferrer">
+                        <a href="{detail_href}">
               {thumb_html}
             </a>
                         <div class="dist"><b>dist</b>: {row['dist_str']}</div>
@@ -1338,6 +1338,7 @@ def photo_detail(
 </head>
 <body>
     <div class="top">
+        <a class='btn' href='/'>⌂ Home</a>
         {first_btn}
         {prev_btn}
         {next_btn}
@@ -1529,7 +1530,10 @@ def photo_viewer(
 </head>
 <body>
     <div class="top">
-        <a class="btn" href="{back_href}">← Dettaglio</a>
+        <div style="display:flex; gap:8px;">
+            <a class="btn" href="/">⌂ Home</a>
+            <a class="btn" href="{back_href}">← Dettaglio</a>
+        </div>
         <div style="display:flex; gap:8px;">
             <button id="fullscreen-btn" class="btn" type="button">⛶</button>
             <a class="btn {'disabled' if not first_href else ''}" href="{first_href or '#'}">⏮</a>
