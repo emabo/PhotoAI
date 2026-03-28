@@ -27,7 +27,8 @@ import torch
 import open_clip
 from PIL import Image, ImageFile, ImageOps
 from dotenv import load_dotenv
-from lib.media_types import SUPPORTED_MIME_TYPES, VIDEO_EXTENSIONS, is_video_mime
+from lib.media_types import SUPPORTED_MIME_TYPES, is_video_mime
+from lib.mime_sqlite import detect_mime as detect_path_mime
 
 try:
     from pillow_heif import register_heif_opener
@@ -189,11 +190,8 @@ def embed_image(model, preprocess, device: str, image: Image.Image) -> List[floa
 
 
 def is_video_media(path: Path, mime: Optional[str] = None) -> bool:
-    mime_clean = (mime or "").strip().lower()
-    if mime_clean:
-        if is_video_mime(mime_clean):
-            return True
-    return path.suffix.lower() in VIDEO_EXTENSIONS
+    mime_clean = (mime or "").strip().lower() or detect_path_mime(path)
+    return is_video_mime(mime_clean)
 
 
 def ensure_thumb(sha1: str, img_path: Path, size: int = THUMB_SIZE, mime: Optional[str] = None) -> Optional[Path]:

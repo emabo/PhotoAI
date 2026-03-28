@@ -665,6 +665,7 @@ def run_sync_missing_photos_dir(
                 st = img_path.stat()
                 file_size = int(st.st_size)
                 mtime = float(st.st_mtime)
+
                 mime = detect_mime(img_path)
 
                 if not is_supported_mime(mime):
@@ -1383,6 +1384,11 @@ def process_one_image(
     from lib import chroma_image_index as idxmod
 
     mime = detect_mime(img_path)
+    if not is_supported_mime(mime):
+        if sha1 is None:
+            sha1 = sha1_file(img_path)
+        return sha1, f"unsupported mime: {mime or 'unknown'}"
+
     if is_base_only_mime(mime):
         return process_one_base_media(
             con=con,

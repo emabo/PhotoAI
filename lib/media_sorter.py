@@ -18,7 +18,7 @@ from lib.filename_date_parser import (
     parse_datetime_from_stem,
     parse_date_from_stem,
 )
-from lib.media_types import is_base_only_mime
+from lib.media_types import is_base_only_mime, is_supported_mime
 
 
 @dataclass
@@ -401,6 +401,12 @@ def compute_file(entry: os.DirEntry, opts: Options, stats: Stats, ext_count: Ext
     print(f"\nFilename: {full_filename_from}")
 
     stats.inc_tot()
+
+    mime = detect_mime(path_from)
+    if not is_supported_mime(mime):
+        stats.inc_skipped()
+        print(f"SKIP unsupported mime: {mime or 'unknown'}")
+        return
 
     filename_to = path_from.stem
     original_filename_base = filename_to

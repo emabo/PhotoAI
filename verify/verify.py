@@ -1147,17 +1147,23 @@ def main() -> int:
         rows = fetch_all(
             con,
             """
-            SELECT sha1, step, status, substr(detail,1,140) AS detail
-            FROM jobs
-            WHERE status='error'
+            SELECT
+              j.sha1,
+              i.path,
+              j.step,
+              j.status,
+              substr(j.detail,1,140) AS detail
+            FROM jobs j
+            LEFT JOIN images i ON i.sha1 = j.sha1
+            WHERE j.status='error'
             ORDER BY updated_at DESC
             LIMIT 20
             """
         )
         print_rows(
-            [(r["sha1"], r["step"], r["status"], r["detail"]) for r in rows],
+            [(r["sha1"], r["path"] or "(no image path)", r["step"], r["status"], r["detail"]) for r in rows],
             max_rows=30,
-            headers=["sha1", "step", "status", "detail"],
+            headers=["sha1", "path", "step", "status", "detail"],
         )
 
         # 3) captions sanity
