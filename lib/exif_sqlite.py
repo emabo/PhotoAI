@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import json
 import os
 import sqlite3
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +23,14 @@ EXIF_DATE_KEYS = (
     "EXIF DateTimeOriginal",
     "EXIF DateTimeDigitized",
     "Image DateTime",
+)
+
+EXIFTOOL_DATE_KEYS = (
+    "DateTimeOriginal",
+    "DateTimeDigitized",
+    "CreateDate",
+    "MediaCreateDate",
+    "TrackCreateDate",
 )
 
 def must_env(name: str) -> str:
@@ -79,6 +89,29 @@ def parse_exif_datetime(tags: Dict[str, object]) -> Optional[int]:
             return int(dt.replace(tzinfo=timezone.utc).timestamp())
         except ValueError:
             continue
+    return None
+
+
+def parse_exiftool_datetime(raw: object) -> Optional[int]:
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        return None
+
+    normalized = text.replace("Z", "+00:00")
+    for fmt in (
+        "%Y:%m:%d %H:%M:%S.%f%z",
+        "%Y:%m:%d %H:%M:%S%z",
+        "%Y:%m:%d %H:%M:%S.%f",
+        "%Y:%m:%d %H:%M:%S",
+    ):
+        try:
+            dt = datetime.strptime(normalized, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except ValueError:
+            continue
+
     return None
 
 
@@ -171,17 +204,94 @@ def parse_exif_gps(tags: Dict[str, object]) -> Tuple[Optional[float], Optional[f
     return lat, lon, alt
 
 
+def read_exiftool_data(image_path: Path) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float]]:
+    try:
+        result = subprocess.run(
+            ["exiftool", "-j", "-n", "-api", "largefilesupport=1", str(image_path)],
+            capture_output=True,
+            timeout=20,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return None, None, None, None
+
+    if result.returncode != 0 or not result.stdout:
+        return None, None, None, None
+
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        return None, None, None, None
+
+    if not isinstance(payload, list) or not payload:
+        return None, None, None, None
+    tags = payload[0]
+    if not isinstance(tags, dict):
+        return None, None, None, None
+
+    taken_at: Optional[int] = None
+    for key in EXIFTOOL_DATE_KEYS:
+        raw_value = tags.get(key)
+        parsed = parse_exiftool_datetime(raw_value)
+        if parsed is not None:
+            taken_at = parsed
+            break
+
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    alt: Optional[float] = None
+
+    try:
+        raw_lat = tags.get("GPSLatitude")
+        if raw_lat is not None:
+            lat = float(raw_lat)
+    except (TypeError, ValueError):
+        lat = None
+
+    try:
+        raw_lon = tags.get("GPSLongitude")
+        if raw_lon is not None:
+            lon = float(raw_lon)
+    except (TypeError, ValueError):
+        lon = None
+
+    try:
+        raw_alt = tags.get("GPSAltitude")
+        if raw_alt is not None:
+            alt = float(raw_alt)
+    except (TypeError, ValueError):
+        alt = None
+
+    return taken_at, lat, lon, alt
+
+
 def read_exif_data(image_path: Path) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float]]:
+    taken_at: Optional[int] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    alt: Optional[float] = None
+
     try:
         import exifread  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError("Package 'exifread' is not installed") from exc
 
-    with image_path.open("rb") as handle:
-        tags: Dict[str, object] = exifread.process_file(handle, details=False)
+        with image_path.open("rb") as handle:
+            tags: Dict[str, object] = exifread.process_file(handle, details=False)
 
-    taken_at = parse_exif_datetime(tags)
-    lat, lon, alt = parse_exif_gps(tags)
+        taken_at = parse_exif_datetime(tags)
+        lat, lon, alt = parse_exif_gps(tags)
+    except Exception:
+        pass
+
+    exiftool_taken_at, exiftool_lat, exiftool_lon, exiftool_alt = read_exiftool_data(image_path)
+
+    if taken_at is None:
+        taken_at = exiftool_taken_at
+    if lat is None:
+        lat = exiftool_lat
+    if lon is None:
+        lon = exiftool_lon
+    if alt is None:
+        alt = exiftool_alt
+
     return taken_at, lat, lon, alt
 
 

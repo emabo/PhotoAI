@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -319,29 +319,15 @@ def extract_date(filename: str, verbose: bool, filename_for_fallback: Optional[s
     
     # Try EXIF extraction for photos (or as fallback)
     try:
-        import exifread  # type: ignore
-        with open(filename, "rb") as handle:
-            tags = exifread.process_file(handle, details=verbose)
+        from lib import exif_sqlite as exifmod
 
-        if verbose:
-            tag_keys = [
-                "EXIF ExifVersion",
-                "EXIF PixelXDimension",
-                "Image XResolution",
-                "Image ImageDescription",
-                "Image DateTime",
-            ]
-            for key in tag_keys:
-                value = _exif_tag_value(tags, key)
-                if value is not None:
-                    print(f"{key.split(' ', 1)[-1]}: {value}")
-
-        date_value = _exif_tag_value(tags, "Image DateTime")
-        if date_value:
-            return datetime.strptime(date_value, "%Y:%m:%d %H:%M:%S")
-    except (ValueError, IsADirectoryError):
-        pass
-    except ImportError:
+        taken_at, _lat, _lon, _alt = exifmod.read_exif_data(path)
+        if taken_at is not None:
+            dt = datetime.fromtimestamp(taken_at, tz=timezone.utc)
+            if verbose:
+                print(f"Photo date from metadata: {dt.isoformat()}")
+            return dt.replace(tzinfo=None)
+    except Exception:
         pass
     
     # Fallback: try filename
