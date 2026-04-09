@@ -1657,6 +1657,11 @@ def main() -> None:
         default="",
         help="With --sync-missing, scan only files with this MIME (e.g. image/jpeg).",
     )
+
+    if len(sys.argv) == 1:
+        parser.print_help()
+        return
+
     args = parser.parse_args()
 
     device = os.environ.get("PHOTOAI_DEVICE", "cuda").strip().lower()
