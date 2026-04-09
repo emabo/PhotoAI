@@ -1042,7 +1042,7 @@ def index():
 
 def render_cards(
     ids: List[str],
-    dists: List[float],
+    dists: List[Optional[float]],
     metas: List[Dict[str, Any]],
     return_query: str = "",
 ) -> str:
@@ -1153,11 +1153,12 @@ def search_html(
     chroma_meta_map: Dict[str, Dict[str, Any]] = {}
 
     # Videos/base-only media are not embedded in Chroma.
-    # When MIME is "all" (empty filter), or explicitly a video MIME,
-    # bypass Chroma candidate restriction so all supported media types can appear.
+    # For an explicit video MIME filter, bypass Chroma entirely.
+    # For the "all MIME" case, keep semantic ranking for embedded media and
+    # append non-embedded rows afterward without synthetic distances.
     mime_clean_for_check = (mime or "").strip().lower()
-    skip_chroma = (not mime_clean_for_check) or is_video_mime(mime_clean_for_check)
-    use_semantic_candidates = bool(q) and effective_sort_by == "semantic" and not skip_chroma
+    explicit_video_mime = is_video_mime(mime_clean_for_check)
+    use_semantic_candidates = bool(q) and effective_sort_by == "semantic" and not explicit_video_mime
 
     if use_semantic_candidates:
         candidate_k = int(min(max(k * 5, 200), MAX_CANDIDATES))
@@ -1178,7 +1179,7 @@ def search_html(
             chroma_meta_map[sid] = meta or {}
 
     rows = fetch_images_filtered(
-        candidate_ids=candidate_ids if use_semantic_candidates else None,
+        candidate_ids=candidate_ids if use_semantic_candidates and bool(mime_clean_for_check) else None,
         folder=folder,
         mime=mime,
         country_code=country_code,
@@ -1197,8 +1198,16 @@ def search_html(
     row_map = {r["sha1"]: r for r in rows}
 
     if use_semantic_candidates:
-        # Semantic ranking from Chroma distances
-        ordered_ids = [sid for sid in (candidate_ids or []) if sid in row_map]
+        semantic_ids = [sid for sid in (candidate_ids or []) if sid in row_map]
+        if mime_clean_for_check:
+            ordered_ids = semantic_ids
+        else:
+            semantic_id_set = set(semantic_ids)
+            remaining_rows = [r for r in rows if r["sha1"] not in semantic_id_set]
+            remaining_rows.sort(
+                key=lambda r: ((r["taken_at"] is None), -(r["taken_at"] or 0), r["path"] or ""),
+            )
+            ordered_ids = semantic_ids + [r["sha1"] for r in remaining_rows]
     elif effective_sort_by == "date_asc":
         ordered_rows = sorted(
             rows,
@@ -1220,7 +1229,7 @@ def search_html(
     ordered_ids = ordered_ids[start_idx:end_idx]
 
     out_ids: List[str] = []
-    out_dists: List[float] = []
+    out_dists: List[Optional[float]] = []
     out_metas: List[Dict[str, Any]] = []
 
     return_query = urlencode(
@@ -1266,7 +1275,7 @@ def search_html(
         meta["location_source"] = r["location_source"]
 
         out_ids.append(sid)
-        out_dists.append(dist_map.get(sid, 0.0 if q else float("nan")))
+        out_dists.append(dist_map.get(sid))
         out_metas.append(meta)
 
     cards_html = render_cards(out_ids, out_dists, out_metas, return_query=return_query)
