@@ -863,8 +863,8 @@ def index():
                 altFormat: "d/m/Y",
             }};
 
-            window.flatpickr("#date_from", opts);
-            window.flatpickr("#date_to", opts);
+            const fpDateFrom = window.flatpickr("#date_from", opts);
+            const fpDateTo = window.flatpickr("#date_to", opts);
 
             const selected = new Map();
             const selectedCount = document.getElementById("selected-count");
@@ -979,7 +979,11 @@ def index():
             }}
 
             function restoreFromUrlAndSearch() {{
-                const params = new URLSearchParams(window.location.search || "");
+                let params = new URLSearchParams(window.location.search || "");
+                if (params.has("ret")) {{
+                    const nested = new URLSearchParams(params.get("ret") || "");
+                    if (nested.toString()) params = nested;
+                }}
                 if (!params.toString()) return;
 
                 const setValue = (id, key) => {{
@@ -999,6 +1003,15 @@ def index():
                 setValue("date_to", "date_to");
                 setValue("k", "k");
                 setValue("sort_by", "sort_by");
+
+                const restoreDate = (fp, key) => {{
+                    if (!fp || !params.has(key)) return;
+                    const v = params.get(key) || "";
+                    if (!v) return;
+                    fp.setDate(v, false, "Y-m-d");
+                }};
+                restoreDate(fpDateFrom, "date_from");
+                restoreDate(fpDateTo, "date_to");
 
                 const setChecked = (name, key) => {{
                     const el = document.querySelector(`input[name="${{name}}"]`);
@@ -1372,7 +1385,7 @@ def photo_detail(
             sep = "&" if "?" in original_href else "?"
             original_href = f"{original_href}{sep}ret={quote_plus(ret)}"
 
-        home_href = f"/?{ret}" if ret else "/"
+        home_href = f"/?ret={quote_plus(ret)}" if ret else "/"
 
         def nav_href(target_sha1: Optional[str], target_pos: int) -> Optional[str]:
             if not target_sha1:
@@ -1621,7 +1634,7 @@ def photo_viewer(
         if ret:
             back_href += f"&ret={quote_plus(ret)}" if "?" in back_href else f"?ret={quote_plus(ret)}"
 
-        home_href = f"/?{ret}" if ret else "/"
+        home_href = f"/?ret={quote_plus(ret)}" if ret else "/"
 
         media_html = (
             f"<video id='viewer-media' class='viewer-media' src='/img/{html_escape(sha1)}' controls playsinline autoplay preload='metadata'></video>"
