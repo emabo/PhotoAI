@@ -430,8 +430,7 @@ def fetch_distinct_mimes() -> List[str]:
             }
         finally:
             con.close()
-    # Always include all supported MIME types so the filter is usable
-    # even before any file of that type has been indexed.
+    # Frontend and backend use the same supported MIME list.
     all_mimes = db_mimes | SUPPORTED_MIME_TYPES
     return sorted(all_mimes, key=str.lower)
 
@@ -1140,11 +1139,11 @@ def search_html(
     dist_map: Dict[str, float] = {}
     chroma_meta_map: Dict[str, Dict[str, Any]] = {}
 
-    # Videos are not embedded in Chroma (BASE_ONLY_MIME_TYPES).
-    # If the user explicitly filters by a video MIME type, bypass Chroma entirely
-    # so that all matching DB rows are returned regardless of embedding status.
+    # Videos/base-only media are not embedded in Chroma.
+    # When MIME is "all" (empty filter), or explicitly a video MIME,
+    # bypass Chroma candidate restriction so all supported media types can appear.
     mime_clean_for_check = (mime or "").strip().lower()
-    skip_chroma = is_video_mime(mime_clean_for_check)
+    skip_chroma = (not mime_clean_for_check) or is_video_mime(mime_clean_for_check)
     use_semantic_candidates = bool(q) and effective_sort_by == "semantic" and not skip_chroma
 
     if use_semantic_candidates:

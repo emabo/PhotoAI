@@ -4,14 +4,10 @@ from typing import Optional, Set
 
 
 PHOTO_MIME_TYPES: Set[str] = {
+    "image/gif",
+    "image/heic",
     "image/jpeg",
     "image/png",
-    "image/gif",
-    "image/webp",
-    "image/bmp",
-    "image/tiff",
-    "image/heic",
-    "image/heif",
 }
 
 VIDEO_MIME_TYPES: Set[str] = {

@@ -549,14 +549,10 @@ These files are not intended as public CLI tools, but they are the internal engi
 
 The currently supported MIME types in code are:
 
+- `image/gif`
+- `image/heic`
 - `image/jpeg`
 - `image/png`
-- `image/gif`
-- `image/webp`
-- `image/bmp`
-- `image/tiff`
-- `image/heic`
-- `image/heif`
 - `video/mp4`
 
 ---
