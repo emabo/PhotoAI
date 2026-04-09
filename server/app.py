@@ -1663,20 +1663,20 @@ def photo_viewer(
 <body>
     <div class="top">
         <div style="display:flex; gap:8px;">
-            <a class="btn" href="{home_href}">⌂ Home</a>
-            <a class="btn" href="{back_href}">← Dettaglio</a>
+            <a id="home-btn" class="btn" href="{home_href}">⌂ Home</a>
+            <a id="back-btn" class="btn" href="{back_href}">← Dettaglio</a>
         </div>
         <div style="display:flex; gap:8px;">
             <button id="fullscreen-btn" class="btn" type="button">⛶</button>
-            <a class="btn {'disabled' if not first_href else ''}" href="{first_href or '#'}">⏮</a>
-            <a class="btn {'disabled' if not prev_href else ''}" href="{prev_href or '#'}">←</a>
-            <a class="btn {'disabled' if not next_href else ''}" href="{next_href or '#'}">→</a>
-            <a class="btn {'disabled' if not last_href else ''}" href="{last_href or '#'}">⏭</a>
+            <a id="nav-first" class="btn {'disabled' if not first_href else ''}" href="{first_href or '#'}">⏮</a>
+            <a id="nav-prev" class="btn {'disabled' if not prev_href else ''}" href="{prev_href or '#'}">←</a>
+            <a id="nav-next" class="btn {'disabled' if not next_href else ''}" href="{next_href or '#'}">→</a>
+            <a id="nav-last" class="btn {'disabled' if not last_href else ''}" href="{last_href or '#'}">⏭</a>
         </div>
     </div>
 
-    <a class="side left" href="{prev_href or '#'}" {'style="pointer-events:none"' if not prev_href else ''}></a>
-    <a class="side right" href="{next_href or '#'}" {'style="pointer-events:none"' if not next_href else ''}></a>
+    <a id="side-left" class="side left" href="{prev_href or '#'}" {'style="pointer-events:none"' if not prev_href else ''}></a>
+    <a id="side-right" class="side right" href="{next_href or '#'}" {'style="pointer-events:none"' if not next_href else ''}></a>
 
     <div class="wrap" id="viewer-wrap">
         {media_html}
@@ -1684,11 +1684,11 @@ def photo_viewer(
 
     <script>
         (function () {{
-            const prevHref = {('"' + prev_href + '"') if prev_href else 'null'};
-            const nextHref = {('"' + next_href + '"') if next_href else 'null'};
-            const firstHref = {('"' + first_href + '"') if first_href else 'null'};
-            const lastHref = {('"' + last_href + '"') if last_href else 'null'};
-            const backHref = "{back_href}";
+            let prevHref = {('"' + prev_href + '"') if prev_href else 'null'};
+            let nextHref = {('"' + next_href + '"') if next_href else 'null'};
+            let firstHref = {('"' + first_href + '"') if first_href else 'null'};
+            let lastHref = {('"' + last_href + '"') if last_href else 'null'};
+            let backHref = "{back_href}";
             const fullscreenBtn = document.getElementById("fullscreen-btn");
 
             let startX = 0;
@@ -1696,10 +1696,90 @@ def photo_viewer(
             let tracking = false;
             let suppressTapUntil = 0;
 
-            function goPrev() {{ if (prevHref) window.location.href = prevHref; }}
-            function goNext() {{ if (nextHref) window.location.href = nextHref; }}
-            function goFirst() {{ if (firstHref) window.location.href = firstHref; }}
-            function goLast() {{ if (lastHref) window.location.href = lastHref; }}
+            const normalizeHref = (href) => href && href !== "#" ? href : null;
+            prevHref = normalizeHref(prevHref);
+            nextHref = normalizeHref(nextHref);
+            firstHref = normalizeHref(firstHref);
+            lastHref = normalizeHref(lastHref);
+
+            function setAnchorHref(id, href) {{
+                const el = document.getElementById(id);
+                if (!(el instanceof HTMLAnchorElement)) return;
+                const normalized = normalizeHref(href);
+                if (normalized) {{
+                    el.setAttribute("href", normalized);
+                    el.classList.remove("disabled");
+                    el.style.pointerEvents = "auto";
+                }} else {{
+                    el.setAttribute("href", "#");
+                    el.classList.add("disabled");
+                    el.style.pointerEvents = "none";
+                }}
+            }}
+
+            function extractHref(doc, id) {{
+                const el = doc.getElementById(id);
+                if (!(el instanceof HTMLAnchorElement)) return null;
+                return normalizeHref(el.getAttribute("href") || "");
+            }}
+
+            async function navigateKeepingFullscreen(href, pushState = true) {{
+                const targetHref = normalizeHref(href);
+                if (!targetHref) return;
+
+                try {{
+                    const res = await fetch(targetHref, {{ credentials: "same-origin" }});
+                    if (!res.ok) {{
+                        window.location.href = targetHref;
+                        return;
+                    }}
+
+                    const html = await res.text();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, "text/html");
+                    const newWrap = doc.getElementById("viewer-wrap");
+                    const wrap = document.getElementById("viewer-wrap");
+                    if (!newWrap || !wrap) {{
+                        window.location.href = targetHref;
+                        return;
+                    }}
+
+                    wrap.innerHTML = newWrap.innerHTML;
+
+                    prevHref = extractHref(doc, "nav-prev");
+                    nextHref = extractHref(doc, "nav-next");
+                    firstHref = extractHref(doc, "nav-first");
+                    lastHref = extractHref(doc, "nav-last");
+                    backHref = extractHref(doc, "back-btn") || backHref;
+                    const homeHref = extractHref(doc, "home-btn");
+
+                    setAnchorHref("nav-prev", prevHref);
+                    setAnchorHref("nav-next", nextHref);
+                    setAnchorHref("nav-first", firstHref);
+                    setAnchorHref("nav-last", lastHref);
+                    setAnchorHref("side-left", prevHref);
+                    setAnchorHref("side-right", nextHref);
+                    setAnchorHref("back-btn", backHref);
+                    setAnchorHref("home-btn", homeHref);
+
+                    const media = document.getElementById("viewer-media");
+                    if (media instanceof HTMLVideoElement) {{
+                        media.play().catch(() => {{}});
+                    }}
+
+                    document.title = doc.title || document.title;
+                    if (pushState) {{
+                        window.history.pushState({{}}, "", targetHref);
+                    }}
+                }} catch (_err) {{
+                    window.location.href = targetHref;
+                }}
+            }}
+
+            function goPrev() {{ if (prevHref) navigateKeepingFullscreen(prevHref); }}
+            function goNext() {{ if (nextHref) navigateKeepingFullscreen(nextHref); }}
+            function goFirst() {{ if (firstHref) navigateKeepingFullscreen(firstHref); }}
+            function goLast() {{ if (lastHref) navigateKeepingFullscreen(lastHref); }}
             async function toggleFullscreen() {{
                 const doc = document;
                 const el = document.documentElement;
@@ -1729,6 +1809,30 @@ def photo_viewer(
 
             const wrap = document.getElementById("viewer-wrap");
             if (!wrap) return;
+
+            function interceptAnchorNavigation(id) {{
+                const el = document.getElementById(id);
+                if (!(el instanceof HTMLAnchorElement)) return;
+                el.addEventListener("click", (ev) => {{
+                    const href = normalizeHref(el.getAttribute("href") || "");
+                    if (!href) return;
+                    ev.preventDefault();
+                    navigateKeepingFullscreen(href);
+                }});
+            }}
+
+            interceptAnchorNavigation("home-btn");
+            interceptAnchorNavigation("back-btn");
+            interceptAnchorNavigation("nav-first");
+            interceptAnchorNavigation("nav-prev");
+            interceptAnchorNavigation("nav-next");
+            interceptAnchorNavigation("nav-last");
+            interceptAnchorNavigation("side-left");
+            interceptAnchorNavigation("side-right");
+
+            window.addEventListener("popstate", () => {{
+                navigateKeepingFullscreen(window.location.href, false);
+            }});
 
             if (fullscreenBtn) {{
                 fullscreenBtn.addEventListener("click", (ev) => {{
@@ -1767,7 +1871,7 @@ def photo_viewer(
                 if (ev.target && ev.target.closest && ev.target.closest("video")) {{
                     return;
                 }}
-                window.location.href = backHref;
+                navigateKeepingFullscreen(backHref);
             }});
         }})();
     </script>
