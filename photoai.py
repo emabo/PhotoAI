@@ -630,7 +630,9 @@ def run_sync_missing_photos_dir(
     updated_count = 0
     done_base_count = 0
     skipped_unsupported_count = 0
+    skipped_duplicate_sha1_count = 0
     error_count = 0
+    seen_sha1_relpath: Dict[str, str] = {}
     update_reason_counts: Dict[str, int] = {
         "missing_row": 0,
         "path": 0,
@@ -675,6 +677,17 @@ def run_sync_missing_photos_dir(
                     continue
 
                 sha1 = sha1_file(img_path)
+
+                prev_relpath = seen_sha1_relpath.get(sha1)
+                if prev_relpath is not None and prev_relpath != relpath:
+                    skipped_duplicate_sha1_count += 1
+                    if not summary_only:
+                        print(
+                            f"[SKIP-DUP-SHA1] {relpath} -> duplicate sha1 already seen at {prev_relpath}"
+                        )
+                    continue
+                seen_sha1_relpath[sha1] = relpath
+
                 w, h = read_image_size(img_path)
 
                 if is_base_only_mime(mime):
@@ -716,6 +729,26 @@ def run_sync_missing_photos_dir(
                     "SELECT sha1, path, mtime, w, h, file_size, mime FROM images WHERE sha1=? LIMIT 1",
                     (sha1,),
                 ).fetchone()
+
+                if row is not None:
+                    db_relpath = str(row["path"] or "").replace("\\", "/").strip("/")
+                    if db_relpath and db_relpath != relpath:
+                        db_abs = (photos_dir_resolved / db_relpath).resolve()
+                        db_file_exists = False
+                        try:
+                            db_abs.relative_to(photos_dir_resolved)
+                            db_file_exists = db_abs.exists() and db_abs.is_file() and db_abs.stat().st_size > 0
+                        except Exception:
+                            db_file_exists = False
+
+                        if db_file_exists:
+                            skipped_duplicate_sha1_count += 1
+                            if not summary_only:
+                                print(
+                                    f"[SKIP-DUP-SHA1] {relpath} -> sha1 already mapped to existing DB file {db_relpath}"
+                                )
+                            continue
+
                 mismatch_reasons = image_info_mismatch_reasons(row, relpath, file_size, mtime, w, h, mime)
                 same_info = len(mismatch_reasons) == 0
 
@@ -880,6 +913,7 @@ def run_sync_missing_photos_dir(
         print(f"  updated    : {updated_count}")
         print(f"  done_base  : {done_base_count}")
         print(f"  skipped    : {skipped_unsupported_count} (unsupported mime)")
+        print(f"  skipped_dup: {skipped_duplicate_sha1_count} (duplicate sha1)")
         print(f"  errors     : {error_count}")
         print(f"  step       : jobs.step='add_all'")
         if dry_run:
