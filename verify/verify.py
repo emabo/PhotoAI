@@ -755,7 +755,7 @@ def run_chroma_verify(con: sqlite3.Connection, missing_limit: int, problems: int
         tokenizer = open_clip.get_tokenizer("ViT-L-14")
         model = model.to(device).eval()
 
-        query_text = os.environ.get("PHOTOAI_TEST_QUERY_IT", "una foto di un gatto")
+        query_text = os.environ.get("PHOTOAI_TEST_QUERY_IT", "a photo of a cat")
         tokens = tokenizer([query_text]).to(device)
         feats = model.encode_text(tokens)
         feats = torch.nn.functional.normalize(feats, dim=-1)
@@ -767,7 +767,7 @@ def run_chroma_verify(con: sqlite3.Connection, missing_limit: int, problems: int
         mets = res.get("metadatas", [[]])[0]
         docs = res.get("documents", [[]])[0]
 
-        print(f"  Query test (IT): {query_text}")
+        print(f"  Query test (IT env var): {query_text}")
         for i, _id in enumerate(ids):
             dist = dists[i] if i < len(dists) else None
             meta = mets[i] if i < len(mets) else {}

@@ -318,11 +318,11 @@ def print_candidate(index: int, total: int, candidate: RemovalCandidate) -> None
     print(f"file_exists : {candidate.file_exists}")
     print(f"thumb_exists: {candidate.thumb_exists}")
     if candidate.errors:
-        print("errori:")
+        print("errors:")
         for err in candidate.errors:
             print(f"  - {format_ts(err.updated_at)} | step={err.step} | detail={err.detail}")
     else:
-        print("errori      : none")
+        print("errors      : none")
 
 
 def ask_action(prompt: str) -> str:
@@ -330,7 +330,7 @@ def ask_action(prompt: str) -> str:
         answer = input(prompt).strip().lower()
         if answer in {"y", "n", "a", "q"}:
             return answer
-        print("Risposta non valida. Usa y, n, a oppure q.")
+        print("Invalid response. Use y, n, a, or q.")
 
 
 def main() -> int:
@@ -338,14 +338,14 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(
         description=(
-            "Rimuove file dal filesystem, SQLite, Chroma e thumbs. "
-            "Con --error scorre i file con job in errore; senza --error usa --path anche con wildcard."
+            "Remove files from filesystem, SQLite, Chroma, and thumbs. "
+            "With --error, iterates over files with failed jobs; without --error, uses --path (also with wildcards)."
         ),
     )
-    ap.add_argument("--error", action="store_true", help="Scorri interattivamente i file che hanno job in errore")
-    ap.add_argument("--path", action="append", default=[], help="Path relativo in PHOTOAI_PHOTOS_DIR")
-    ap.add_argument("--limit", type=int, default=0, help="Limita i file errorati esaminati (0 = tutti)")
-    ap.add_argument("--dry-run", action="store_true", help="Mostra le azioni senza eseguirle")
+    ap.add_argument("--error", action="store_true", help="Interactively iterate files that have failed jobs")
+    ap.add_argument("--path", action="append", default=[], help="Relative path inside PHOTOAI_PHOTOS_DIR")
+    ap.add_argument("--limit", type=int, default=0, help="Limit failed files examined (0 = all)")
+    ap.add_argument("--dry-run", action="store_true", help="Show actions without executing them")
     args = ap.parse_args()
 
     if not args.error and not args.path:
@@ -378,7 +378,7 @@ def main() -> int:
         print(f"PHOTOS_DIR: {photos_dir}")
         print(f"THUMB_DIR : {thumb_dir}")
         if args.dry_run:
-            print("Modo      : dry-run")
+            print("Mode      : dry-run")
 
         if args.error:
             candidates = collect_error_candidates(
@@ -389,18 +389,18 @@ def main() -> int:
                 only_paths=only_paths if only_paths else None,
             )
             if not candidates:
-                print("Nessun file con stato error trovato.")
+                print("No files with error status found.")
                 return 0
 
             print(f"Candidati : {len(candidates)}")
             if only_paths:
-                print(f"Filtri path: {len(only_paths)}")
+                print(f"Path filters: {len(only_paths)}")
 
             yes_to_all = False
             for idx, candidate in enumerate(candidates, start=1):
                 print_candidate(idx, len(candidates), candidate)
                 answer = "y" if yes_to_all else ask_action(
-                    "Rimuovere da DB/fs/chroma/thumb? [y]es / [n]o / [a]ll / [q]uit: "
+                    "Remove from DB/fs/chroma/thumb? [y]es / [n]o / [a]ll / [q]uit: "
                 )
                 if answer == "q":
                     break
@@ -412,7 +412,7 @@ def main() -> int:
 
                 actions, chroma_error = remove_candidate(con, candidate, photos_dir, thumb_dir, args.dry_run)
                 removed += 1
-                print("Azioni:")
+                print("Actions:")
                 for action in actions:
                     print(f"  - {action}")
                 if chroma_error:
@@ -421,7 +421,7 @@ def main() -> int:
         else:
             relpaths = resolve_relpaths_from_selectors(con, photos_dir, only_paths)
             if not relpaths:
-                print("Nessun file trovato con i path/wildcard specificati.")
+                print("No files found for the specified paths/wildcards.")
                 return 0
 
             candidates: List[RemovalCandidate] = []
@@ -433,22 +433,22 @@ def main() -> int:
                     not_found.append(relpath)
 
             if not candidates:
-                print("Nessun candidato valido da rimuovere.")
+                print("No valid candidates to remove.")
                 if not_found:
-                    print("Path non risolti:")
+                    print("Unresolved paths:")
                     for p in not_found[:30]:
                         print(f"  - {p}")
                 return 0
 
             print(f"Candidati : {len(candidates)}")
             if not_found:
-                print(f"Path non risolti: {len(not_found)}")
+                print(f"Unresolved paths: {len(not_found)}")
 
             yes_to_all = False
             for idx, candidate in enumerate(candidates, start=1):
                 print_candidate(idx, len(candidates), candidate)
                 answer = "y" if yes_to_all else ask_action(
-                    "Rimuovere questo file da DB/fs/chroma/thumb? [y]es / [n]o / [a]ll / [q]uit: "
+                    "Remove this file from DB/fs/chroma/thumb? [y]es / [n]o / [a]ll / [q]uit: "
                 )
                 if answer == "q":
                     break
@@ -460,7 +460,7 @@ def main() -> int:
 
                 actions, chroma_error = remove_candidate(con, candidate, photos_dir, thumb_dir, args.dry_run)
                 removed += 1
-                print("Azioni:")
+                print("Actions:")
                 for action in actions:
                     print(f"  - {action}")
                 if chroma_error:

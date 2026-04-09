@@ -16,12 +16,12 @@ if [[ -z "$HOST_IP" ]]; then
 fi
 
 if [[ -z "$HOST_IP" ]]; then
-  echo "[ERROR] Impossibile determinare l'IP del server automaticamente."
-  echo "Imposta HOST_IP manualmente, ad esempio: HOST_IP=192.168.1.50 ./run_uvicorn_external.sh"
+  echo "[ERROR] Unable to determine the server IP automatically."
+  echo "Set HOST_IP manually, for example: HOST_IP=192.168.1.50 ./run_uvicorn_external.sh"
   exit 1
 fi
 
-echo "[INFO] Avvio uvicorn su ${HOST_IP}:${PORT}"
+echo "[INFO] Starting uvicorn on ${HOST_IP}:${PORT}"
 echo "[INFO] URL: http://${HOST_IP}:${PORT}"
 
 exec uvicorn "$APP" --host "$HOST_IP" --port "$PORT"

@@ -29,37 +29,37 @@ def must_env(name: str) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Visita ricorsivamente tutti i file di una directory sorgente, calcola la SHA1 e copia "
-            "solo quelli non presenti nel DB SQLite mantenendo il path relativo originale."
+            "Recursively scan all files in a source directory, compute SHA1, and copy "
+            "only those not present in the SQLite DB while preserving original relative paths."
         )
     )
     parser.add_argument(
         "--from",
         dest="src_dir",
         required=True,
-        help="Directory sorgente da scandire ricorsivamente.",
+        help="Source directory to scan recursively.",
     )
     parser.add_argument(
         "--to",
         dest="dst_dir",
         required=True,
-        help="Directory destinazione dove copiare i file mancanti dal DB.",
+        help="Destination directory where files missing from DB will be copied.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Non copia nulla, stampa solo cosa verrebbe copiato.",
+        help="Do not copy anything, only print what would be copied.",
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=0,
-        help="Numero massimo di file da visitare (0 = nessun limite).",
+        help="Maximum number of files to scan (0 = no limit).",
     )
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Sovrascrive i file già esistenti in destinazione. Default: skip.",
+        help="Overwrite files already present at destination. Default: skip.",
     )
     return parser.parse_args()
 
@@ -272,7 +272,7 @@ def main() -> int:
                     skipped_known += 1
                     continue
                 db_known_but_missing_or_empty += 1
-                db_rel = sha1_to_db_path.get(file_sha1, "(path_db_mancante)")
+                db_rel = sha1_to_db_path.get(file_sha1, "(db_path_missing)")
                 print(f"[DB-MISSING-OR-EMPTY] {rel_path} -> {db_rel}")
 
             if not is_supported_mime(mime):

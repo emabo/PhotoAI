@@ -781,55 +781,55 @@ def index():
                 id="q"
                 type="text"
                 name="q"
-                placeholder="Cerca (es: 'tramonto sul mare', 'cane in montagna'...)"
+                placeholder="Search (e.g.: 'sunset on the sea', 'dog in the mountains'...)"
                 autocomplete="off"
             />
 
-            <input id="folder" type="text" name="folder" placeholder="Filtro path contiene" style="width: 220px;" />
+            <input id="folder" type="text" name="folder" placeholder="Path contains filter" style="width: 220px;" />
             <select id="mime" name="mime" style="padding: 10px 12px; border: 1px solid #ccc; border-radius: 10px; min-width: 220px;">
-                <option value="" selected>Tutti i mime</option>
+                <option value="" selected>All MIME types</option>
                 {mime_options_html}
             </select>
             <span style="flex-basis: 100%; height: 0;"></span>
-            <input id="city" type="text" name="city" placeholder="Città" style="width: 160px;" />
-            <input id="region" type="text" name="region" placeholder="Regione" style="width: 160px;" />
-            <input id="country_code" type="text" name="country_code" placeholder="Country code (es. IT)" style="width: 170px;" />
+            <input id="city" type="text" name="city" placeholder="City" style="width: 160px;" />
+            <input id="region" type="text" name="region" placeholder="Region" style="width: 160px;" />
+            <input id="country_code" type="text" name="country_code" placeholder="Country code (e.g. IT)" style="width: 170px;" />
             <span style="flex-basis: 100%; height: 0;"></span>
-            <input id="date_from" type="text" name="date_from" title="Data da" placeholder="GG/MM/AAAA" autocomplete="off" />
-            <input id="date_to" type="text" name="date_to" title="Data a" placeholder="GG/MM/AAAA" autocomplete="off" />
+            <input id="date_from" type="text" name="date_from" title="Date from" placeholder="DD/MM/YYYY" autocomplete="off" />
+            <input id="date_to" type="text" name="date_to" title="Date to" placeholder="DD/MM/YYYY" autocomplete="off" />
             <span style="flex-basis: 100%; height: 0;"></span>
 
             <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="has_caption_en" value="true" />caption EN</label>
-            <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="only_complete" value="true" />solo complete</label>
+            <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="only_complete" value="true" />only complete</label>
             </div>
 
             <div class="row">
-                <input id="k" type="number" name="k" value="{DEFAULT_K}" min="1" max="{MAX_K}" title="Numero risultati (k)" />
+                <input id="k" type="number" name="k" value="{DEFAULT_K}" min="1" max="{MAX_K}" title="Number of results (k)" />
                 <select id="sort_by" name="sort_by" style="padding: 10px 12px; border: 1px solid #ccc; border-radius: 10px;">
                     <option value="semantic">Sort: semantic</option>
-                    <option value="date_desc">Sort: data ↓</option>
-                    <option value="date_asc" selected>Sort: data ↑</option>
+                    <option value="date_desc">Sort: date ↓</option>
+                    <option value="date_asc" selected>Sort: date ↑</option>
                 </select>
             </div>
         </form>
   </div>
 
   <div class="hint">
-        Tip: query testuale + filtri strutturati (data/geo/località). Se lasci query vuota, cerca solo con i filtri SQLite.
+        Tip: text query + structured filters (date/geo/location). If query is empty, search only with SQLite filters.
   </div>
 
     <div class="row" style="margin-top: 8px;">
         <button id="delete-selected-btn" type="button" style="padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer;" disabled>
-            Elimina selezionate
+            Delete selected
         </button>
-        <span id="selected-count" class="small" style="margin-top:0;">Selezionate: 0</span>
+        <span id="selected-count" class="small" style="margin-top:0;">Selected: 0</span>
     </div>
 
   <div id="results"></div>
 
   <hr style="margin: 18px 0; border: none; border-top: 1px solid #eee;" />
 
-  <h3 style="margin: 0 0 10px;">Cerca per immagine (upload)</h3>
+    <h3 style="margin: 0 0 10px;">Search by image (upload)</h3>
   <form hx-post="/api/search_by_image_html" hx-target="#results_img" hx-encoding="multipart/form-data">
     <div class="row">
       <input type="file" name="file" accept="image/*" />
@@ -840,12 +840,12 @@ def index():
   <div id="results_img"></div>
 
     <dialog id="delete-dialog" style="max-width: min(860px, 95vw); width: 95vw; border: 1px solid #ddd; border-radius: 12px; padding: 14px;">
-        <h3 style="margin: 0 0 8px;">Conferma cancellazione</h3>
-        <div class="small" style="margin: 0 0 8px;">Stai per cancellare queste immagini da disco, SQLite, Chroma e thumbnail:</div>
+        <h3 style="margin: 0 0 8px;">Confirm deletion</h3>
+        <div class="small" style="margin: 0 0 8px;">You are about to delete these images from disk, SQLite, Chroma, and thumbnails:</div>
         <ul id="delete-list" style="max-height: 40vh; overflow: auto; margin: 0 0 12px 18px;"></ul>
         <div class="row" style="justify-content: flex-end;">
-            <button id="delete-cancel-btn" type="button" style="padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer;">Annulla</button>
-            <button id="delete-confirm-btn" type="button" style="padding: 8px 12px; border-radius: 10px; border: 1px solid #c33; background: #d33; color: #fff; cursor: pointer;">Conferma eliminazione</button>
+            <button id="delete-cancel-btn" type="button" style="padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer;">Cancel</button>
+            <button id="delete-confirm-btn" type="button" style="padding: 8px 12px; border-radius: 10px; border: 1px solid #c33; background: #d33; color: #fff; cursor: pointer;">Confirm deletion</button>
         </div>
     </dialog>
 
@@ -881,7 +881,7 @@ def index():
 
             function updateSelectionUI() {{
                 const n = selected.size;
-                if (selectedCount) selectedCount.textContent = `Selezionate: ${{n}}`;
+                if (selectedCount) selectedCount.textContent = `Selected: ${{n}}`;
                 if (deleteBtn) deleteBtn.disabled = n === 0;
             }}
 
@@ -907,7 +907,7 @@ def index():
                 if (typeof dialog.showModal === "function") {{
                     dialog.showModal();
                 }} else {{
-                    alert("Conferma cancellazione:\\n" + Array.from(selected.values()).map((x) => x.path || x.sha1).join("\\n"));
+                    alert("Confirm deletion:\\n" + Array.from(selected.values()).map((x) => x.path || x.sha1).join("\\n"));
                 }}
             }}
 
@@ -932,9 +932,9 @@ def index():
                     if (filters && window.htmx) {{
                         window.htmx.trigger(filters, "change");
                     }}
-                    alert(`Eliminazione completata.\\nDB: ${{payload.deleted_db}} | Chroma: ${{payload.deleted_chroma}} | File: ${{payload.deleted_files}} | Thumbs: ${{payload.deleted_thumbs}}`);
+                    alert(`Deletion completed.\\nDB: ${{payload.deleted_db}} | Chroma: ${{payload.deleted_chroma}} | Files: ${{payload.deleted_files}} | Thumbs: ${{payload.deleted_thumbs}}`);
                 }} catch (err) {{
-                    alert("Errore in cancellazione: " + (err?.message || err));
+                    alert("Deletion error: " + (err?.message || err));
                 }} finally {{
                     deleteConfirmBtn.disabled = false;
                 }}
@@ -1078,7 +1078,7 @@ def render_cards(
         )
 
     if not rows_data:
-        return "<div class='small'>Nessun risultato (o file non accessibili / fuori da PHOTOS_DIR).</div>"
+        return "<div class='small'>No results (or files not accessible / outside PHOTOS_DIR).</div>"
 
     ctx = store_search_context([r["sha1"] for r in rows_data])
     cards = []
@@ -1100,15 +1100,15 @@ def render_cards(
           <div class="card">
                         <label class="small" style="display:flex; align-items:center; gap:6px; margin-top:0;">
                             <input type="checkbox" class="photo-select" data-sha1="{html_escape(sid)}" data-path="{html_escape(str(row['display_path']))}" />
-                            seleziona
+                            select
                         </label>
                         <a href="{detail_href}">
               {thumb_html}
             </a>
                         <div class="dist"><b>dist</b>: {row['dist_str']}</div>
             <div class="small">{html_escape(row['display_path'])}</div>
-                        <div class="small">data: {html_escape(row['taken_at_str'])}</div>
-                        <div class="small">luogo: {html_escape(row['place_name'])}</div>
+                                                <div class="small">date: {html_escape(row['taken_at_str'])}</div>
+                                                <div class="small">place: {html_escape(row['place_name'])}</div>
           </div>
         """)
 
@@ -1179,7 +1179,7 @@ def search_html(
     )
 
     if not rows:
-        return "<div class='small'>Nessun risultato con i filtri correnti.</div>"
+        return "<div class='small'>No results with current filters.</div>"
 
     total_rows = len(rows)
     row_map = {r["sha1"]: r for r in rows}
@@ -1406,14 +1406,14 @@ def photo_detail(
         )
 
         prev_btn = (
-            f"<a class='btn' href='{prev_href}'>← Precedente</a>"
+            f"<a class='btn' href='{prev_href}'>← Previous</a>"
             if prev_href
-                else "<span class='btn disabled'>← Precedente</span>"
+                else "<span class='btn disabled'>← Previous</span>"
         )
         next_btn = (
-            f"<a class='btn' href='{next_href}'>Successiva →</a>"
+            f"<a class='btn' href='{next_href}'>Next →</a>"
             if next_href
-                else "<span class='btn disabled'>Successiva →</span>"
+                else "<span class='btn disabled'>Next →</span>"
         )
 
         media_html = (
@@ -1423,7 +1423,7 @@ def photo_detail(
         )
 
         return f"""<!doctype html>
-<html lang="it-IT">
+<html lang="en-US">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -1446,24 +1446,24 @@ def photo_detail(
         {prev_btn}
         {next_btn}
         {last_btn}
-        <a class="btn" href="{original_href}" target="_self">Apri file originale</a>
+        <a class="btn" href="{original_href}" target="_self">Open original file</a>
     </div>
 
     {media_html}
 
     <div class="box">
-        <h3 style="margin:0 0 10px;">Informazioni</h3>
+        <h3 style="margin:0 0 10px;">Information</h3>
         <div><span class="k">sha1:</span> {html_escape(str(image['sha1']))}</div>
         <div><span class="k">path:</span> {html_escape(str(rel_path))}</div>
-        <div><span class="k">dimensioni:</span> {html_escape(str(image['w']))}×{html_escape(str(image['h']))}</div>
+        <div><span class="k">dimensions:</span> {html_escape(str(image['w']))}×{html_escape(str(image['h']))}</div>
         <div><span class="k">file_size:</span> {html_escape(str(image['file_size']))}</div>
         <div><span class="k">mime:</span> {html_escape(str(image['mime'] or '-'))}</div>
-        <div><span class="k">durata:</span> {html_escape(_fmt_duration(image['duration'] if 'duration' in image.keys() else None))}</div>
-        <div><span class="k">data:</span> {html_escape(taken_at_str)}</div>
+        <div><span class="k">duration:</span> {html_escape(_fmt_duration(image['duration'] if 'duration' in image.keys() else None))}</div>
+        <div><span class="k">date:</span> {html_escape(taken_at_str)}</div>
         <div><span class="k">mtime:</span> {html_escape(mtime_str)}</div>
-        <div><span class="k">aggiunta:</span> {html_escape(added_at_str)}</div>
+        <div><span class="k">added:</span> {html_escape(added_at_str)}</div>
         <div><span class="k">gps:</span> {html_escape(str(image['gps_lat']))}, {html_escape(str(image['gps_lon']))} (alt: {html_escape(str(image['gps_alt']))})</div>
-        <div><span class="k">luogo:</span> {html_escape(str(image['city'] or '-'))}, {html_escape(str(image['region'] or '-'))}, {html_escape(str(image['country'] or '-'))} [{html_escape(str(image['country_code'] or '-'))}]</div>
+        <div><span class="k">place:</span> {html_escape(str(image['city'] or '-'))}, {html_escape(str(image['region'] or '-'))}, {html_escape(str(image['country'] or '-'))} [{html_escape(str(image['country_code'] or '-'))}]</div>
         <div><span class="k">place_name:</span> {html_escape(str(image['place_name'] or '-'))}</div>
         <div><span class="k">location_source:</span> {html_escape(str(image['location_source'] or '-'))}</div>
     </div>

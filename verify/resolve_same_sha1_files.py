@@ -151,7 +151,7 @@ def collect_candidates(con: sqlite3.Connection, photos_dir: Path) -> List[Candid
         try:
             sha1 = sha1_file(abs_path)
         except Exception as exc:
-            print(f"WARN: sha1 non calcolabile per {relpath}: {exc}", file=sys.stderr)
+            print(f"WARN: unable to compute sha1 for {relpath}: {exc}", file=sys.stderr)
             continue
 
         db_row = db_by_sha1.get(sha1)
@@ -192,21 +192,21 @@ def prompt_choice(candidate: Candidate, photos_dir: Path) -> Optional[str]:
     db_exists = db_abs.exists()
     print("\n" + "=" * 90)
     print(f"SHA1: {candidate.sha1}")
-    print(f" k) DB : {candidate.db_relpath} {'[OK]' if db_exists else '[MANCANTE]'}")
+    print(f" k) DB : {candidate.db_relpath} {'[OK]' if db_exists else '[MISSING]'}")
     
     print_grouped_dup_relpaths(candidate.dup_relpaths)
 
-    print("\nScelte:")
-    print("  k   = tieni il file gia presente al path DB e rimuovi solo i duplicati non mappati")
-    print("  d   = tieni la entry DB ma ricollegala a uno dei file FS sopra; la scelta del file avviene dopo")
-    print("  s = salta")
-    print("  q = esci")
+    print("\nChoices:")
+    print("  k   = keep the file already referenced by the DB path and remove only unmapped duplicates")
+    print("  d   = keep the DB entry but relink it to one of the FS files above; file selection comes next")
+    print("  s = skip")
+    print("  q = quit")
 
     while True:
-        answer = input("Selezione: ").strip().lower()
+        answer = input("Selection: ").strip().lower()
         if answer in {"k", "d", "s", "q"}:
             return answer
-        print("Valore non valido.")
+        print("Invalid value.")
 
 
 def remove_file(path: Path) -> None:
@@ -217,7 +217,7 @@ def remove_file(path: Path) -> None:
 def resolve_keep_existing_db_file(candidate: Candidate, photos_dir: Path) -> Tuple[int, int]:
     db_abs = photos_dir / candidate.db_relpath
     if not db_abs.exists():
-        raise RuntimeError(f"file DB non trovato: {candidate.db_relpath}")
+        raise RuntimeError(f"DB file not found: {candidate.db_relpath}")
 
     removed = 0
     errors = 0
@@ -228,7 +228,7 @@ def resolve_keep_existing_db_file(candidate: Candidate, photos_dir: Path) -> Tup
             removed += 1
         except Exception as exc:
             errors += 1
-            print(f"WARN: impossibile rimuovere {relpath}: {exc}", file=sys.stderr)
+            print(f"WARN: unable to remove {relpath}: {exc}", file=sys.stderr)
     return removed, errors
 
 
@@ -245,21 +245,21 @@ def are_files_in_same_dir(candidate: Candidate) -> bool:
 def choose_existing_relpath(candidate: Candidate, photos_dir: Path) -> str:
     existing = [relpath for relpath in candidate.dup_relpaths if (photos_dir / relpath).exists()]
     if not existing:
-        raise RuntimeError("nessun file alternativo esistente trovato sul filesystem")
+        raise RuntimeError("no existing alternative file found on filesystem")
     if len(existing) == 1:
         return existing[0]
 
-    print("\nSono presenti piu file candidati. Scegli quale path associare alla entry DB:")
+    print("\nMultiple candidate files are available. Choose which path to associate to the DB entry:")
     for idx, relpath in enumerate(existing, start=1):
         print(f"  {idx}) {relpath}")
 
     while True:
-        answer = input("Path da associare al DB: ").strip()
+        answer = input("Path to associate with DB: ").strip()
         if answer.isdigit():
             idx = int(answer)
             if 1 <= idx <= len(existing):
                 return existing[idx - 1]
-        print("Valore non valido.")
+        print("Invalid value.")
 
 
 def resolve_keep_db(
@@ -271,7 +271,7 @@ def resolve_keep_db(
     db_abs = photos_dir / candidate.db_relpath
     selected_abs = photos_dir / selected_relpath
     if not selected_abs.exists():
-        raise RuntimeError(f"file selezionato non trovato: {selected_relpath}")
+        raise RuntimeError(f"selected file not found: {selected_relpath}")
 
     removed = 0
     errors = 0
@@ -282,7 +282,7 @@ def resolve_keep_db(
             removed += 1
         except Exception as exc:
             errors += 1
-            print(f"WARN: impossibile rimuovere {candidate.db_relpath}: {exc}", file=sys.stderr)
+            print(f"WARN: unable to remove {candidate.db_relpath}: {exc}", file=sys.stderr)
 
     for relpath in candidate.dup_relpaths:
         if relpath == selected_relpath:
@@ -293,7 +293,7 @@ def resolve_keep_db(
             removed += 1
         except Exception as exc:
             errors += 1
-            print(f"WARN: impossibile rimuovere {relpath}: {exc}", file=sys.stderr)
+            print(f"WARN: unable to remove {relpath}: {exc}", file=sys.stderr)
 
     update_related_path_fields(con, candidate.sha1, selected_relpath)
     update_image_technical_fields(con, candidate.sha1, selected_abs)
@@ -304,19 +304,19 @@ def resolve_keep_db(
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Trova file con stesso SHA1 di una entry già presente nel DB e chiede quale tenere."
+            "Find files with the same SHA1 as an entry already present in the DB and ask which one to keep."
         )
     )
     parser.add_argument(
         "root",
         nargs="?",
-        help="Directory foto. Se omessa usa PHOTOAI_PHOTOS_DIR.",
+        help="Photos directory. If omitted, uses PHOTOAI_PHOTOS_DIR.",
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=0,
-        help="Numero massimo di gruppi da processare (0 = nessun limite).",
+        help="Maximum number of groups to process (0 = no limit).",
     )
     return parser.parse_args(argv)
 
@@ -327,18 +327,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     photos_dir_raw = (args.root or os.environ.get("PHOTOAI_PHOTOS_DIR") or "").strip()
     if not photos_dir_raw:
-        print("ERRORE: specifica una directory oppure imposta PHOTOAI_PHOTOS_DIR.", file=sys.stderr)
+        print("ERROR: specify a directory or set PHOTOAI_PHOTOS_DIR.", file=sys.stderr)
         return 2
 
     photos_dir = Path(photos_dir_raw).expanduser().resolve()
     if not photos_dir.exists() or not photos_dir.is_dir():
-        print(f"ERRORE: directory non valida: {photos_dir}", file=sys.stderr)
+        print(f"ERROR: invalid directory: {photos_dir}", file=sys.stderr)
         return 2
 
     try:
         con, db_path = connect_db()
     except Exception as exc:
-        print(f"ERRORE: {exc}", file=sys.stderr)
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
     try:
@@ -349,7 +349,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.limit > 0:
             candidates = candidates[: args.limit]
 
-        print(f"Gruppi trovati: {len(candidates)}")
+        print(f"Groups found: {len(candidates)}")
         if not candidates:
             return 0
 
@@ -368,7 +368,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"SHA1: {candidate.sha1}")
                 print(f" k) DB : {candidate.db_relpath} [OK]")
                 print_grouped_dup_relpaths(candidate.dup_relpaths)
-                print("\n[AUTO] Tutti i duplicati nella stessa dir del file DB: scelgo automaticamente 'k'")
+                print("\n[AUTO] All duplicates are in the same directory as the DB file: automatically selecting 'k'")
             else:
                 choice = prompt_choice(candidate, photos_dir)
 
@@ -383,8 +383,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     removed, op_errors = resolve_keep_existing_db_file(candidate, photos_dir)
                     con.commit()
                     print(
-                        "OK: tenuto il file gia presente nel DB, path invariato e rimossi "
-                        f"{removed} file duplicati"
+                        "OK: kept the file already present in DB, path unchanged, and removed "
+                        f"{removed} duplicate files"
                     )
                 elif choice == "d":
                     selected_relpath = choose_existing_relpath(candidate, photos_dir)
@@ -396,24 +396,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     )
                     con.commit()
                     print(
-                        "OK: tenuta entry DB, aggiornato path DB a "
-                        f"{selected_relpath} e rimossi {removed} file"
+                        "OK: kept DB entry, updated DB path to "
+                        f"{selected_relpath}, and removed {removed} files"
                     )
                     if chroma_error:
-                        print(f"WARN: aggiornamento path su Chroma fallito: {chroma_error}", file=sys.stderr)
+                        print(f"WARN: failed to update path on Chroma: {chroma_error}", file=sys.stderr)
                 removed_files += removed
                 errors += op_errors
                 groups_done += 1
             except Exception as exc:
                 con.rollback()
                 errors += 1
-                print(f"ERRORE: {exc}", file=sys.stderr)
+                print(f"ERROR: {exc}", file=sys.stderr)
 
-        print("\nRiepilogo:")
-        print(f"  gruppi_processati={groups_done}")
-        print(f"  gruppi_saltati={skipped}")
-        print(f"  file_rimossi={removed_files}")
-        print(f"  errori={errors}")
+        print("\nSummary:")
+        print(f"  groups_processed={groups_done}")
+        print(f"  groups_skipped={skipped}")
+        print(f"  files_removed={removed_files}")
+        print(f"  errors={errors}")
         return 0 if errors == 0 else 1
     finally:
         con.close()
